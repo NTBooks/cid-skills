@@ -437,6 +437,10 @@ async function handleLoad() {
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');
 
+  // Clear verification status to reset checkboxes
+  document.getElementById('verification-status').innerHTML = '';
+  document.getElementById('gateway-status').innerHTML = '';
+
   // Show loading panel
   document.getElementById('empty-state').classList.add('hidden');
   document.getElementById('file-preview').classList.add('hidden');
@@ -938,6 +942,10 @@ async function handleReverify() {
 
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');
+
+  // Clear verification status to reset checkboxes
+  document.getElementById('verification-status').innerHTML = '';
+  document.getElementById('gateway-status').innerHTML = '';
 
   // Show loading panel
   document.getElementById('file-preview').classList.add('hidden');
