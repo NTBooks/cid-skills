@@ -1,0 +1,409 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+    Cantarell, sans-serif;
+  min-height: 100vh;
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.url-bar {
+  display: flex;
+  padding: 12px;
+  background-color: #252526;
+  border-bottom: 1px solid #3e3e42;
+  gap: 8px;
+}
+
+#cid-input {
+  flex: 1;
+  padding: 8px 12px;
+  background-color: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  font-size: 14px;
+}
+
+#cid-input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+#verify-btn {
+  padding: 8px 24px;
+  background-color: #007acc;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+#verify-btn:hover {
+  background-color: #005a9e;
+}
+
+#verify-btn:disabled {
+  background-color: #3c3c3c;
+  cursor: not-allowed;
+}
+
+.main-content {
+  flex: 1;
+  padding: 24px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.empty-state p {
+  margin-bottom: 12px;
+  color: #858585;
+  font-size: 14px;
+}
+
+.empty-state .hint {
+  font-size: 12px;
+  color: #6e6e6e;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.loading-panel,
+.result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.loading-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.loading-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cancel-btn {
+  padding: 6px 16px;
+  background-color: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.cancel-btn:hover {
+  background-color: #4c4c4c;
+}
+
+.gateway-status {
+  margin-bottom: 24px;
+}
+
+.gateway-status h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #d4d4d4;
+}
+
+.gateway-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  background-color: #252526;
+  border-radius: 4px;
+  border-left: 4px solid #3e3e42;
+}
+
+.gateway-item.loading {
+  border-left-color: #007acc;
+}
+
+.gateway-item.success {
+  border-left-color: #4ec9b0;
+}
+
+.gateway-item.error {
+  border-left-color: #f48771;
+}
+
+.gateway-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.gateway-progress {
+  font-size: 12px;
+  color: #858585;
+  margin-top: 4px;
+}
+
+.verification-status {
+  margin-top: 24px;
+}
+
+.verification-status h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #d4d4d4;
+}
+
+.verification-step {
+  padding: 12px;
+  margin-bottom: 8px;
+  background-color: #252526;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.verification-step input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.verification-step-label {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.verification-step-label strong {
+  color: #d4d4d4;
+}
+
+.verification-step-error {
+  border-left: 4px solid #f48771;
+}
+
+.result-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.verification-result {
+  padding: 16px;
+  background-color: #252526;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.local-hash-section {
+  padding: 16px;
+  background-color: #252526;
+  border-radius: 4px;
+  border-top: 1px solid #3e3e42;
+}
+
+.local-hash-label {
+  font-size: 12px;
+  color: #858585;
+  margin-bottom: 4px;
+}
+
+.local-hash-value {
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.local-hash-value.match {
+  color: #4ec9b0;
+}
+
+.local-hash-value.mismatch {
+  color: #f48771;
+}
+
+.skill-metadata-section {
+  padding: 16px;
+  background-color: #252526;
+  border-radius: 4px;
+  border-top: 1px solid #3e3e42;
+}
+
+.skill-metadata-content h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4ec9b0;
+  margin-bottom: 12px;
+}
+
+.metadata-item {
+  font-size: 13px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.metadata-item strong {
+  color: #858585;
+  margin-right: 8px;
+}
+
+.metadata-item a {
+  color: #4ec9b0;
+  text-decoration: none;
+}
+
+.metadata-item a:hover {
+  text-decoration: underline;
+}
+
+.metadata-item pre {
+  background-color: #1e1e1e;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+  margin-top: 4px;
+  color: #d4d4d4;
+}
+
+.preview-section {
+  padding: 16px 0;
+  border-top: 1px solid #3e3e42;
+}
+
+.preview-label {
+  font-size: 14px;
+  color: #858585;
+  margin-bottom: 8px;
+}
+
+.preview-iframe {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  height: 400px;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  background-color: #1e1e1e;
+}
+
+.download-section {
+  padding: 16px;
+  background-color: #252526;
+  border-radius: 4px;
+  border-top: 1px solid #3e3e42;
+}
+
+.download-label {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: #858585;
+}
+
+.download-btn {
+  padding: 8px 24px;
+  background-color: #007acc;
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.download-btn:hover {
+  background-color: #005a9e;
+}
+
+.blockchain-verify-section {
+  padding: 16px;
+  background-color: #252526;
+  border-radius: 4px;
+  border-top: 1px solid #3e3e42;
+}
+
+.blockchain-verify-label {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: #858585;
+}
+
+.blockchain-verify-btn,
+.blockchain-verify-btn.clv-inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: transparent;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.blockchain-verify-btn:hover,
+.blockchain-verify-btn.clv-inline-link:hover {
+  background-color: #3c3c3c;
+  border-color: #4ec9b0;
+  color: #4ec9b0;
+}
+
+.blockchain-verify-btn .clv-inline-icon,
+.blockchain-verify-btn.clv-inline-link .clv-inline-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.verification-disabled {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.verification-disabled .download-btn:disabled {
+  cursor: not-allowed;
+}
+
+.verification-disabled-msg {
+  font-size: 13px;
+  color: #858585;
+  margin: 0;
+}
+
+.error-message {
+  color: #f48771;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.success-message {
+  color: #4ec9b0;
+  font-size: 14px;
+}

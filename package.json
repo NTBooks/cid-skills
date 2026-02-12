@@ -1,17 +1,70 @@
 {
   "name": "diamond-soul-downloader",
-  "version": "1.0.0",
-  "description": "Diamond Soul Downloader - IPFS CID file viewer with verification",
+  "version": "0.1.0",
+  "description": "Diamond Soul Downloader - Install AI Skills from IPFS",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder && npm run cleanup:dist",
+    "dist:win": "electron-builder --win && npm run cleanup:dist",
+    "dist:mac": "electron-builder --mac && npm run cleanup:dist",
+    "dist:linux": "electron-builder --linux && npm run cleanup:dist",
+    "cleanup:dist": "node scripts/cleanup-dist.js"
   },
-  "keywords": ["ipfs", "electron", "cid"],
-  "author": "",
+  "keywords": [
+    "ipfs",
+    "electron",
+    "cid"
+  ],
+  "author": "Nick <nick@chainletter.io>",
   "license": "MIT",
+  "build": {
+    "appId": "com.diamondsoul.downloader",
+    "productName": "Diamond Soul Downloader",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "styles.css",
+      "icon.png",
+      "do_not_modify/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "icon.png",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "icon.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
   "devDependencies": {
-    "electron": "^28.0.0"
+    "electron": "^40.4.0",
+    "electron-builder": "^26.7.0"
   },
   "dependencies": {
     "ipfs-only-hash": "^2.0.1"

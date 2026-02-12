@@ -124,6 +124,13 @@ body {
   border-radius: 4px;
 }
 
+.tag-header.drag-over {
+  background-color: #094771;
+  border-radius: 4px;
+  outline: 2px dashed #007acc;
+  outline-offset: 2px;
+}
+
 .tag-header::before {
   content: '▶';
   display: inline-block;
@@ -340,7 +347,32 @@ body {
   border-bottom: 1px solid #3e3e42;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.preview-header-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.preview-tags {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preview-tags.hidden {
+  display: none;
+}
+
+.preview-tag {
+  font-size: 12px;
+  color: #858585;
+  background-color: #2d2d30;
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
 .preview-actions {
@@ -476,6 +508,63 @@ body {
   font-size: 14px;
   color: #4ec9b0;
   word-break: break-all;
+}
+
+/* DSOUL disambiguation modal */
+.dsoul-modal-content {
+  max-width: 520px;
+}
+
+.dsoul-modal-hint {
+  font-size: 13px;
+  color: #858585;
+  margin-bottom: 12px;
+}
+
+.dsoul-entries-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.dsoul-entry-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  margin-bottom: 8px;
+  background-color: #252526;
+  border: 2px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.dsoul-entry-option:hover {
+  background-color: #2d2d30;
+}
+
+.dsoul-entry-option.selected {
+  border-color: #007acc;
+  background-color: #094771;
+}
+
+.dsoul-entry-option .entry-name {
+  font-weight: 600;
+  color: #4ec9b0;
+  margin-bottom: 4px;
+}
+
+.dsoul-entry-option .entry-author {
+  font-size: 12px;
+  color: #858585;
+}
+
+.dsoul-entry-option .entry-tags {
+  font-size: 11px;
+  color: #6a6a6a;
+  margin-top: 4px;
 }
 
 .context-menu {
@@ -653,4 +742,27 @@ body {
   content: ' ✓';
   color: #4ec9b0;
   font-weight: bold;
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #252526;
+  border-top: 1px solid #3e3e42;
+  flex-shrink: 0;
+}
+
+.open-skills-folder-btn {
+  padding: 6px 12px;
+  background-color: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #d4d4d4;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.open-skills-folder-btn:hover {
+  background-color: #4c4c4c;
 }

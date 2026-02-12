@@ -319,6 +319,14 @@ function setupEventListeners() {
     }
   });
 
+  const openSkillsFolderBtn = document.getElementById('open-skills-folder-btn');
+  openSkillsFolderBtn.addEventListener('click', async () => {
+    const result = await window.electronAPI.openSkillsFolder();
+    if (!result.success) {
+      alert(result.error || 'Could not open skills folder.');
+    }
+  });
+
   toggleActiveBtn.addEventListener('click', handleToggleActive);
 
   // Install button
@@ -328,6 +336,8 @@ function setupEventListeners() {
 
 // Store verified file content temporarily
 let verifiedFileContent = null;
+// Chosen DSOUL entry from disambiguation (used when saving file on Load or Reverify)
+let pendingDsoulEntry = null;
 
 async function handleInstall() {
   if (!currentLoadCid) return;
@@ -346,14 +356,16 @@ async function handleInstall() {
     // Parse skill header if present
     const skillMetadata = parseSkillHeader(verifiedFileContent);
     
-    // Save file
+    // Preserve existing file fields (tags, active, dsoulEntry) when updating
+    const existing = await window.electronAPI.readFile(cid);
     const fileData = {
-      cid: cid,
+      cid,
       content: verifiedFileContent,
-      tags: [],
-      active: false,
+      tags: existing?.tags ?? [],
+      active: existing?.active ?? false,
       skillMetadata: skillMetadata || null,
-      createdAt: new Date().toISOString()
+      dsoulEntry: pendingDsoulEntry ?? existing?.dsoulEntry ?? null,
+      createdAt: existing?.createdAt ?? new Date().toISOString()
     };
 
     const saveResult = await window.electronAPI.saveFile(fileData);
@@ -374,6 +386,7 @@ async function handleInstall() {
     // Reset state
     currentLoadCid = null;
     verifiedFileContent = null;
+    pendingDsoulEntry = null;
   } catch (error) {
     alert('Error installing file: ' + error.message);
   } finally {
@@ -432,7 +445,8 @@ async function handleLoad() {
   loadBtn.disabled = true;
   isLoading = true;
   currentLoadCid = cid;
-  verifiedFileContent = null; // Reset verified content
+  verifiedFileContent = null;
+  pendingDsoulEntry = null;
 
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');
@@ -447,6 +461,11 @@ async function handleLoad() {
   document.getElementById('loading-panel').classList.remove('hidden');
 
   try {
+    // Fetch DSOUL list and have user pick one (or none) before verifying
+    const dsoulResult = await window.electronAPI.fetchDsoulByCid(cid);
+    const entries = dsoulResult.success && Array.isArray(dsoulResult.data) ? dsoulResult.data : [];
+    pendingDsoulEntry = await showDsoulDisambiguationModal(entries, null);
+
     await loadAndVerifyFile(cid);
     // On success, keep the panel open for review - don't clear input yet
   } catch (error) {
@@ -714,18 +733,80 @@ async function loadFileTree() {
   Object.keys(tagGroups).sort().forEach(tag => {
     const tagGroup = document.createElement('div');
     tagGroup.className = 'tag-group';
-    
+
     const tagHeader = document.createElement('div');
     tagHeader.className = 'tag-header';
+    tagHeader.dataset.tag = tag;
     tagHeader.textContent = tag;
     tagHeader.addEventListener('click', () => {
       tagHeader.classList.toggle('collapsed');
       tagFiles.classList.toggle('collapsed');
     });
 
+    tagHeader.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    tagHeader.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      tagHeader.classList.add('drag-over');
+    });
+    tagHeader.addEventListener('dragleave', (e) => {
+      if (!tagHeader.contains(e.relatedTarget)) {
+        tagHeader.classList.remove('drag-over');
+      }
+    });
+    tagHeader.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      tagHeader.classList.remove('drag-over');
+      const cid = e.dataTransfer.getData('text/plain');
+      if (!cid) return;
+      const file = await window.electronAPI.readFile(cid);
+      if (!file) return;
+      const tags = file.tags || [];
+      if (tags.includes(tag)) return;
+      tags.push(tag);
+      await window.electronAPI.updateFileTags(cid, tags);
+      await loadFileTree();
+      if (currentFile && currentFile.cid === cid) {
+        currentFile.tags = tags;
+      }
+    });
+
     const tagFiles = document.createElement('div');
     tagFiles.className = 'tag-files';
-    
+    tagFiles.dataset.tag = tag;
+
+    tagFiles.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    tagFiles.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      tagHeader.classList.add('drag-over');
+    });
+    tagFiles.addEventListener('dragleave', (e) => {
+      if (!tagGroup.contains(e.relatedTarget)) {
+        tagHeader.classList.remove('drag-over');
+      }
+    });
+    tagFiles.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      tagHeader.classList.remove('drag-over');
+      const cid = e.dataTransfer.getData('text/plain');
+      if (!cid) return;
+      const file = await window.electronAPI.readFile(cid);
+      if (!file) return;
+      const tags = file.tags || [];
+      if (tags.includes(tag)) return;
+      tags.push(tag);
+      await window.electronAPI.updateFileTags(cid, tags);
+      await loadFileTree();
+      if (currentFile && currentFile.cid === cid) {
+        currentFile.tags = tags;
+      }
+    });
+
     tagGroups[tag].forEach(file => {
       const fileItem = createFileItem(file);
       tagFiles.appendChild(fileItem);
@@ -756,7 +837,8 @@ function createFileItem(file) {
   if (file.active) {
     fileItem.classList.add('active');
   }
-  
+  fileItem.draggable = true;
+
   // Use skill name if available, otherwise use CID
   const displayName = file.skillMetadata?.name || file.cid.substring(0, 20) + '...';
   const displayTitle = file.skillMetadata 
@@ -766,6 +848,11 @@ function createFileItem(file) {
   fileItem.textContent = displayName;
   fileItem.title = displayTitle;
   fileItem.dataset.cid = file.cid;
+
+  fileItem.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', file.cid);
+    e.dataTransfer.effectAllowed = 'copy';
+  });
 
   fileItem.addEventListener('click', async (e) => {
     // Remove previous selection
@@ -821,28 +908,21 @@ async function showFilePreview(cid) {
   document.getElementById('loading-panel').classList.add('hidden');
   document.getElementById('file-preview').classList.remove('hidden');
 
-  // Set preview title
-  const title = file.skillMetadata?.name 
-    ? `${file.skillMetadata.name} (CID: ${cid})`
-    : `CID: ${cid}`;
-  document.getElementById('preview-title').textContent = title;
-  
+  renderPreviewHeaderAndMetadata(file, cid);
+
   // Update blockchain verify link with CID and trigger render
   const previewClverify = document.getElementById('preview-clverify');
   const filePreview = document.getElementById('file-preview');
   if (previewClverify) {
     previewClverify.setAttribute('cid', cid);
-    // If already rendered by CLVerify, remove and recreate the element
     const previewActions = document.querySelector('.preview-actions');
     const existingLink = previewActions ? previewActions.querySelector('a[cid].clv-inline-link') : null;
     if (existingLink && existingLink.id !== 'preview-clverify') {
-      // CLVerify has replaced our <a> tag, recreate it
       const newLink = document.createElement('a');
       newLink.id = 'preview-clverify';
       newLink.setAttribute('cid', cid);
       newLink.setAttribute('mode', 'dark');
       newLink.setAttribute('global', 'true');
-      // Use base gateway URL (remove any CID that might be in the gateway)
       const gatewayUrl = 'https://chainletter.mypinata.cloud/ipfs/QmUEsNroVsNT6ZfJKS7hosYBWt2CYhvyTf2KwfFhKULgJb';
       const baseGateway = gatewayUrl.replace(/\/[Qmb][a-zA-Z0-9]{40,}$/, '/') || 'https://chainletter.mypinata.cloud/ipfs/';
       newLink.setAttribute('gateway', baseGateway);
@@ -852,53 +932,183 @@ async function showFilePreview(cid) {
       newLink.textContent = 'Blockchain Verify';
       existingLink.replaceWith(newLink);
     }
-    // Trigger scan to render the blockchain verify button
     if (window.CLVerify && window.CLVerify.scan) {
       window.CLVerify.scan(filePreview);
-      // Fix image URLs after rendering
       setTimeout(() => fixCLVerifyImages(filePreview), 100);
     }
-  }
-
-  // Display skill metadata if available
-  const skillMetadataDiv = document.getElementById('skill-metadata');
-  if (file.skillMetadata) {
-    skillMetadataDiv.classList.remove('hidden');
-    let metadataHtml = '<div class="skill-metadata-content"><h4>Skill Information</h4>';
-    
-    if (file.skillMetadata.name) {
-      metadataHtml += `<div class="metadata-item"><strong>Name:</strong> ${escapeHtml(file.skillMetadata.name)}</div>`;
-    }
-    if (file.skillMetadata.version) {
-      metadataHtml += `<div class="metadata-item"><strong>Version:</strong> ${escapeHtml(file.skillMetadata.version)}</div>`;
-    }
-    if (file.skillMetadata.description) {
-      metadataHtml += `<div class="metadata-item"><strong>Description:</strong> ${escapeHtml(file.skillMetadata.description)}</div>`;
-    }
-    if (file.skillMetadata.homepage) {
-      metadataHtml += `<div class="metadata-item"><strong>Homepage:</strong> <a href="${escapeHtml(file.skillMetadata.homepage)}" target="_blank">${escapeHtml(file.skillMetadata.homepage)}</a></div>`;
-    }
-    if (file.skillMetadata.metadata) {
-      metadataHtml += `<div class="metadata-item"><strong>Metadata:</strong> <pre>${escapeHtml(JSON.stringify(file.skillMetadata.metadata, null, 2))}</pre></div>`;
-    }
-    
-    metadataHtml += '</div>';
-    skillMetadataDiv.innerHTML = metadataHtml;
-  } else {
-    skillMetadataDiv.classList.add('hidden');
   }
 
   // Set preview content
   document.getElementById('preview-content').textContent = file.content;
 
-  // Calculate and display CID
   await updateCidDisplay(cid);
+
+  // If no DSOUL data, auto-fetch (single result auto-picked; multiple = modal)
+  if (!file.dsoulEntry) {
+    ensureDsoulEntry(cid, file);
+  }
+}
+
+/**
+ * Render preview header (title + tags) and skill metadata (including DSOUL download, license, author).
+ */
+function renderPreviewHeaderAndMetadata(file, cid) {
+  const title = file.skillMetadata?.name
+    ? `${file.skillMetadata.name} (CID: ${cid})`
+    : `CID: ${cid}`;
+  document.getElementById('preview-title').textContent = title;
+
+  const tagsEl = document.getElementById('preview-tags');
+  const tags = file.tags && file.tags.length ? file.tags : [];
+  if (tags.length > 0) {
+    tagsEl.innerHTML = tags.map((t) => `<span class="preview-tag">${escapeHtml(t)}</span>`).join('');
+    tagsEl.classList.remove('hidden');
+  } else {
+    tagsEl.innerHTML = '';
+    tagsEl.classList.add('hidden');
+  }
+
+  const skillMetadataDiv = document.getElementById('skill-metadata');
+  let hasAny = false;
+  let metadataHtml = '<div class="skill-metadata-content"><h4>Skill Information</h4>';
+
+  if (file.skillMetadata) {
+    if (file.skillMetadata.name) {
+      metadataHtml += `<div class="metadata-item"><strong>Name:</strong> ${escapeHtml(file.skillMetadata.name)}</div>`;
+      hasAny = true;
+    }
+    if (file.skillMetadata.version) {
+      metadataHtml += `<div class="metadata-item"><strong>Version:</strong> ${escapeHtml(file.skillMetadata.version)}</div>`;
+      hasAny = true;
+    }
+    if (file.skillMetadata.description) {
+      metadataHtml += `<div class="metadata-item"><strong>Description:</strong> ${escapeHtml(file.skillMetadata.description)}</div>`;
+      hasAny = true;
+    }
+    if (file.skillMetadata.homepage) {
+      metadataHtml += `<div class="metadata-item"><strong>Homepage:</strong> <a href="${escapeHtml(file.skillMetadata.homepage)}" target="_blank" rel="noopener noreferrer">${escapeHtml(file.skillMetadata.homepage)}</a></div>`;
+      hasAny = true;
+    }
+    if (file.skillMetadata.metadata) {
+      metadataHtml += `<div class="metadata-item"><strong>Metadata:</strong> <pre>${escapeHtml(JSON.stringify(file.skillMetadata.metadata, null, 2))}</pre></div>`;
+      hasAny = true;
+    }
+  }
+
+  if (file.dsoulEntry) {
+    const e = file.dsoulEntry;
+    if (e.author_name || e.author_url) {
+      const authorLink = e.author_url
+        ? `<a href="${escapeHtml(e.author_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.author_name || '')}</a>`
+        : escapeHtml(e.author_name || '');
+      metadataHtml += `<div class="metadata-item"><strong>Author:</strong> ${authorLink}</div>`;
+      hasAny = true;
+    }
+    if (e.tags && e.tags.length > 0) {
+      metadataHtml += `<div class="metadata-item"><strong>Tags:</strong> ${e.tags.map((t) => escapeHtml(t)).join(', ')}</div>`;
+      hasAny = true;
+    }
+    if (e.download_url) {
+      metadataHtml += `<div class="metadata-item"><strong>Download:</strong> <a href="${escapeHtml(e.download_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.download_url)}</a></div>`;
+      hasAny = true;
+    }
+    if (e.license_url) {
+      metadataHtml += `<div class="metadata-item"><strong>License:</strong> <a href="${escapeHtml(e.license_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.license_url)}</a></div>`;
+      hasAny = true;
+    }
+  }
+
+  metadataHtml += '</div>';
+  skillMetadataDiv.innerHTML = metadataHtml;
+  if (hasAny) {
+    skillMetadataDiv.classList.remove('hidden');
+  } else {
+    skillMetadataDiv.classList.add('hidden');
+  }
+}
+
+/**
+ * If file has no dsoulEntry, fetch DSOUL API. Single result is auto-picked and saved; multiple opens modal.
+ */
+async function ensureDsoulEntry(cid, file) {
+  try {
+    const result = await window.electronAPI.fetchDsoulByCid(cid);
+    const entries = result.success && Array.isArray(result.data) ? result.data : [];
+    if (entries.length === 0) return;
+    const chosen = await showDsoulDisambiguationModal(entries, null);
+    if (chosen) {
+      file.dsoulEntry = chosen;
+      await window.electronAPI.saveFile(file);
+      if (currentFile && currentFile.cid === cid) {
+        currentFile.dsoulEntry = chosen;
+      }
+      renderPreviewHeaderAndMetadata(currentFile && currentFile.cid === cid ? currentFile : file, cid);
+    }
+  } catch (err) {
+    console.warn('DSOUL fetch failed:', err);
+  }
 }
 
 function escapeHtml(text) {
+  if (text == null || text === undefined) return '';
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = String(text);
   return div.innerHTML;
+}
+
+/**
+ * Show modal to pick one DSOUL entry. Returns Promise<entry | null>.
+ * If entries is empty, resolves with null without showing modal.
+ * If exactly one entry, returns it without showing modal.
+ * currentEntry: optional saved entry to pre-select (matched by download_url).
+ */
+function showDsoulDisambiguationModal(entries, currentEntry) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return Promise.resolve(null);
+  }
+  if (entries.length === 1) {
+    return Promise.resolve(entries[0]);
+  }
+  const modal = document.getElementById('dsoul-modal');
+  const listEl = document.getElementById('dsoul-entries-list');
+  const confirmBtn = document.getElementById('dsoul-confirm-btn');
+  const cancelBtn = document.getElementById('dsoul-cancel-btn');
+  const preSelected = currentEntry
+    ? entries.find((e) => e.download_url === currentEntry.download_url)
+    : null;
+  let selectedEntry = preSelected || entries[0];
+
+  listEl.innerHTML = '';
+  entries.forEach((entry) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dsoul-entry-option' + (entry === selectedEntry ? ' selected' : '');
+    btn.innerHTML = `
+      <span class="entry-name">${escapeHtml(entry.name || 'Unnamed')}</span>
+      <span class="entry-author">${escapeHtml(entry.author_name || '')}</span>
+      <span class="entry-tags">${(entry.tags || []).map((t) => escapeHtml(t)).join(', ')}</span>
+    `;
+    btn.addEventListener('click', () => {
+      selectedEntry = entry;
+      listEl.querySelectorAll('.dsoul-entry-option').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+    });
+    listEl.appendChild(btn);
+  });
+
+  return new Promise((resolve) => {
+    const finish = (value) => {
+      modal.classList.add('hidden');
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(value);
+    };
+    const onConfirm = () => finish(selectedEntry);
+    const onCancel = () => finish(null);
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.classList.remove('hidden');
+  });
 }
 
 async function updateCidDisplay(cid) {
@@ -938,7 +1148,7 @@ async function handleReverify() {
   loadBtn.disabled = true;
   isLoading = true;
   currentLoadCid = cid;
-  verifiedFileContent = null; // Reset verified content
+  verifiedFileContent = null;
 
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');
@@ -952,6 +1162,11 @@ async function handleReverify() {
   document.getElementById('loading-panel').classList.remove('hidden');
 
   try {
+    // Fetch DSOUL list again and let user pick (pre-select current choice)
+    const dsoulResult = await window.electronAPI.fetchDsoulByCid(cid);
+    const entries = dsoulResult.success && Array.isArray(dsoulResult.data) ? dsoulResult.data : [];
+    pendingDsoulEntry = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
+
     await loadAndVerifyFile(cid);
     // On success, keep panel open for review
     // User can click Cancel to go back to preview

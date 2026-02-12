@@ -11,5 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   activateFile: (cid) => ipcRenderer.invoke('activate-file', cid),
-  deactivateFile: (cid) => ipcRenderer.invoke('deactivate-file', cid)
+  deactivateFile: (cid) => ipcRenderer.invoke('deactivate-file', cid),
+  openSkillsFolder: () => ipcRenderer.invoke('open-skills-folder'),
+  fetchDsoulByCid: (cid) => ipcRenderer.invoke('fetch-dsoul-by-cid', cid)
 });

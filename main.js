@@ -1,8 +1,31 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const os = require('os');
 const Hash = require('ipfs-only-hash');
+
+const defaultDsoulUrlTemplate = 'https://dsoul.org/wp-json/diamond-soul/v1/search_by_cid?cid={CID}';
+
+async function loadDsoulUrlTemplate() {
+  const envPaths = [
+    app.isPackaged ? path.join(path.dirname(process.execPath), '.env') : null,
+    path.join(app.getPath('userData'), '.env'),
+    path.join(__dirname, '.env')
+  ].filter(Boolean);
+  for (const envPath of envPaths) {
+    try {
+      const content = await fs.readFile(envPath, 'utf-8');
+      const match = content.match(/^\s*DSOUL\s*=\s*(.+?)\s*$/m);
+      if (match) {
+        const value = match[1].replace(/^["']|["']$/g, '').trim();
+        if (value) return value;
+      }
+    } catch (_) {
+      // file missing or unreadable, try next
+    }
+  }
+  return defaultDsoulUrlTemplate;
+}
 
 let mainWindow;
 const userDataPath = app.getPath('userData');
@@ -153,6 +176,28 @@ ipcMain.handle('calculate-hash', async (event, content) => {
   }
 });
 
+ipcMain.handle('fetch-dsoul-by-cid', async (event, cid) => {
+  try {
+    const template = await loadDsoulUrlTemplate();
+    const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}: ${text || res.statusText}` };
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      return { success: false, error: `Invalid JSON: ${text.slice(0, 200)}${text.length > 200 ? '...' : ''}` };
+    }
+    return { success: true, data };
+  } catch (error) {
+    const msg = error && (error.message || String(error));
+    return { success: false, error: msg };
+  }
+});
+
 // Settings handlers
 async function loadSettings() {
   try {
@@ -191,6 +236,18 @@ ipcMain.handle('select-folder', async () => {
     return { success: true, path: result.filePaths[0] };
   }
   return { success: false };
+});
+
+ipcMain.handle('open-skills-folder', async () => {
+  const settings = await loadSettings();
+  if (!settings.skillsFolder) {
+    return { success: false, error: 'Skills folder not set. Please configure it in Options.' };
+  }
+  const err = await shell.openPath(settings.skillsFolder);
+  if (err) {
+    return { success: false, error: err };
+  }
+  return { success: true };
 });
 
 // File activation handlers

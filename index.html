@@ -46,7 +46,10 @@
 
         <div id="file-preview" class="file-preview hidden">
           <div class="preview-header">
-            <h3 id="preview-title">File Preview</h3>
+            <div class="preview-header-left">
+              <h3 id="preview-title">File Preview</h3>
+              <div id="preview-tags" class="preview-tags hidden"></div>
+            </div>
             <div class="preview-actions">
               <button id="reverify-btn" class="reverify-btn">Reverify</button>
               <a id="preview-clverify" cid="" mode="dark" global="true" gateway="https://chainletter.mypinata.cloud/ipfs/" api="staging-verify.clstamp.com" logo="true" class="blockchain-verify-btn">Blockchain Verify</a>
@@ -61,6 +64,11 @@
           <p>Enter an IPFS CID above to load a file, or select a file from the sidebar.</p>
         </div>
       </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="app-footer">
+      <button id="open-skills-folder-btn" class="open-skills-folder-btn" title="Open the folder where activated skills are deployed">Open skills folder</button>
     </div>
   </div>
 
@@ -79,6 +87,19 @@
       <div class="modal-buttons">
         <button id="tag-submit">Add</button>
         <button id="tag-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DSOUL Disambiguation Modal -->
+  <div id="dsoul-modal" class="modal hidden">
+    <div class="modal-content dsoul-modal-content">
+      <h3>Choose Diamond Soul entry for this CID</h3>
+      <p class="dsoul-modal-hint">A CID can have multiple entries on Diamond Soul. Pick the one that matches this file.</p>
+      <div id="dsoul-entries-list" class="dsoul-entries-list"></div>
+      <div class="modal-buttons">
+        <button id="dsoul-confirm-btn" class="dsoul-confirm-btn">Confirm</button>
+        <button id="dsoul-cancel-btn" class="dsoul-cancel-btn">Cancel</button>
       </div>
     </div>
   </div>
