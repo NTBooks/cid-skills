@@ -136,6 +136,10 @@ let fileContextMenuCid = null;
 let currentSettings = null;
 let currentLoadCid = null;
 let isLoading = false;
+/** Map of local file CID -> next_cid from API when scan finds an update */
+let nextCidsByCid = new Map();
+/** Map of CID -> raw DSOUL API response (for "View full JSON") */
+let dsoulApiResponseByCid = new Map();
 
 // Fix CLVerify image URLs to use local images
 function fixCLVerifyImages(container) {
@@ -332,10 +336,27 @@ function setupEventListeners() {
   // Install button
   const installBtn = document.getElementById('install-btn');
   installBtn.addEventListener('click', handleInstall);
+
+  // Version buttons (prev/next)
+  const downloadPrevBtn = document.getElementById('download-prev-btn');
+  const updateAvailableBtn = document.getElementById('update-available-btn');
+  if (downloadPrevBtn) downloadPrevBtn.addEventListener('click', handleDownloadPreviousVersion);
+  if (updateAvailableBtn) updateAvailableBtn.addEventListener('click', handleUpdateAvailable);
+
+  // Scan for updates in sidebar
+  const scanUpdatesBtn = document.getElementById('scan-updates-btn');
+  if (scanUpdatesBtn) scanUpdatesBtn.addEventListener('click', handleScanForUpdates);
+
+  const viewFullJsonBtn = document.getElementById('view-full-json-btn');
+  const refreshJsonBtn = document.getElementById('refresh-json-btn');
+  if (viewFullJsonBtn) viewFullJsonBtn.addEventListener('click', handleViewFullJson);
+  if (refreshJsonBtn) refreshJsonBtn.addEventListener('click', handleRefreshJson);
 }
 
-// Store verified file content temporarily
+// Store verified file content temporarily (string for skills, ArrayBuffer for bundles)
 let verifiedFileContent = null;
+/** True when verified content is a bundle (zip); content is ArrayBuffer. */
+let verifiedFileIsBundle = false;
 // Chosen DSOUL entry from disambiguation (used when saving file on Load or Reverify)
 let pendingDsoulEntry = null;
 
@@ -353,14 +374,16 @@ async function handleInstall() {
   loadBtn.disabled = true;
 
   try {
-    // Parse skill header if present
-    const skillMetadata = parseSkillHeader(verifiedFileContent);
+    const isBundle = verifiedFileIsBundle;
+    const contentStr = typeof verifiedFileContent === 'string' ? verifiedFileContent : new TextDecoder().decode(verifiedFileContent);
+    const skillMetadata = isBundle ? null : parseSkillHeader(contentStr);
     
     // Preserve existing file fields (tags, active, dsoulEntry) when updating
     const existing = await window.electronAPI.readFile(cid);
     const fileData = {
       cid,
-      content: verifiedFileContent,
+      content: isBundle ? undefined : verifiedFileContent,
+      is_bundle: isBundle || undefined,
       tags: existing?.tags ?? [],
       active: existing?.active ?? false,
       skillMetadata: skillMetadata || null,
@@ -368,7 +391,7 @@ async function handleInstall() {
       createdAt: existing?.createdAt ?? new Date().toISOString()
     };
 
-    const saveResult = await window.electronAPI.saveFile(fileData);
+    const saveResult = await window.electronAPI.saveFile(fileData, isBundle ? verifiedFileContent : undefined);
     if (!saveResult.success) {
       alert('Error saving file: ' + saveResult.error);
       return;
@@ -386,6 +409,7 @@ async function handleInstall() {
     // Reset state
     currentLoadCid = null;
     verifiedFileContent = null;
+    verifiedFileIsBundle = false;
     pendingDsoulEntry = null;
   } catch (error) {
     alert('Error installing file: ' + error.message);
@@ -397,6 +421,16 @@ async function handleInstall() {
 
 async function loadSettings() {
   currentSettings = await window.electronAPI.getSettings();
+}
+
+function arrayBuffersEqual(a, b) {
+  if (a.byteLength !== b.byteLength) return false;
+  const ua = new Uint8Array(a);
+  const ub = new Uint8Array(b);
+  for (let i = 0; i < ua.length; i++) {
+    if (ua[i] !== ub[i]) return false;
+  }
+  return true;
 }
 
 // Extract CID from IPFS path or validate CID format
@@ -422,6 +456,101 @@ function parseIPFSPath(input) {
   
   // If it doesn't match IPFS path or CID format, return null
   return null;
+}
+
+/**
+ * Start the load panel for a given CID (used by "Download previous version" and "Update available").
+ */
+function loadCidInPanel(cid) {
+  const cidInput = document.getElementById('cid-input');
+  if (!cid || !cidInput) return;
+  cidInput.value = cid;
+  handleLoad();
+}
+
+async function handleDownloadPreviousVersion() {
+  const prevCid = currentFile?.dsoulEntry?.prev_cid;
+  if (!prevCid) return;
+  loadCidInPanel(prevCid);
+}
+
+async function handleUpdateAvailable() {
+  const nextCid = currentFile?.dsoulEntry?.next_cid;
+  if (!nextCid) return;
+  loadCidInPanel(nextCid);
+}
+
+async function handleScanForUpdates() {
+  const scanBtn = document.getElementById('scan-updates-btn');
+  if (scanBtn) scanBtn.disabled = true;
+  nextCidsByCid = new Map();
+  const files = await window.electronAPI.getFiles();
+  for (const file of files) {
+    const cid = file.cid;
+    if (!cid) continue;
+    try {
+      const result = await window.electronAPI.fetchDsoulByCid(cid);
+      const data = result.success && Array.isArray(result.data) ? result.data : [];
+      const entry = data.length === 1 ? data[0] : data.find((e) => e.cid === cid) || data[0];
+      if (entry && entry.next_cid && entry.next_cid !== cid) {
+        nextCidsByCid.set(cid, entry.next_cid);
+      }
+    } catch (_) {
+      // Skip on error
+    }
+  }
+  await loadFileTree();
+  if (scanBtn) scanBtn.disabled = false;
+}
+
+async function handleViewFullJson() {
+  const pre = document.getElementById('full-json-content');
+  const btn = document.getElementById('view-full-json-btn');
+  if (!pre || !btn) return;
+  if (!currentFile) return;
+  const cid = currentFile.cid;
+  if (pre.classList.contains('hidden')) {
+    let apiResponse = dsoulApiResponseByCid.get(cid);
+    if (apiResponse === undefined) {
+      const result = await window.electronAPI.fetchDsoulByCid(cid);
+      dsoulApiResponseByCid.set(cid, result);
+      apiResponse = result;
+    }
+    pre.textContent = JSON.stringify(apiResponse, null, 2);
+    pre.classList.remove('hidden');
+    btn.textContent = 'Hide full JSON';
+  } else {
+    pre.classList.add('hidden');
+    btn.textContent = 'View full JSON';
+  }
+}
+
+async function handleRefreshJson() {
+  if (!currentFile) return;
+  const cid = currentFile.cid;
+  const refreshBtn = document.getElementById('refresh-json-btn');
+  if (refreshBtn) refreshBtn.disabled = true;
+  try {
+    const result = await window.electronAPI.fetchDsoulByCid(cid);
+    dsoulApiResponseByCid.set(cid, result);
+    const entries = result.success && Array.isArray(result.data) ? result.data : [];
+    if (entries.length === 0) {
+      currentFile.dsoulEntry = null;
+    } else {
+      const chosen = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
+      currentFile.dsoulEntry = chosen;
+    }
+    await window.electronAPI.saveFile(currentFile);
+    renderPreviewHeaderAndMetadata(currentFile, cid);
+    const pre = document.getElementById('full-json-content');
+    if (pre && !pre.classList.contains('hidden')) {
+      pre.textContent = JSON.stringify(result, null, 2);
+    }
+  } catch (err) {
+    console.warn('Refresh JSON failed:', err);
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
 }
 
 async function handleLoad() {
@@ -469,11 +598,17 @@ async function handleLoad() {
     await loadAndVerifyFile(cid);
     // On success, keep the panel open for review - don't clear input yet
   } catch (error) {
-    // On error, keep the CID in the input and show error in panel
-    // Don't clear the input or show alert - let user see the error and try again
+    // Show error in verification panel so user sees what went wrong
     console.error('Error loading file:', error);
-    // Hide install section on error
     document.getElementById('install-section').classList.add('hidden');
+    const verificationDiv = document.getElementById('verification-status');
+    if (verificationDiv) {
+      const errEl = document.createElement('div');
+      errEl.className = 'verification-step';
+      errEl.style.borderLeft = '4px solid #f48771';
+      errEl.innerHTML = `<div class="verification-step-label" style="color: #f48771;">Load failed: ${escapeHtml(error.message || String(error))}</div>`;
+      verificationDiv.appendChild(errEl);
+    }
   } finally {
     loadBtn.disabled = false;
     isLoading = false;
@@ -492,6 +627,7 @@ function handleCancelLoad() {
   // Reset state
   isLoading = false;
   verifiedFileContent = null;
+  verifiedFileIsBundle = false;
   const loadBtn = document.getElementById('load-btn');
   loadBtn.disabled = false;
 }
@@ -511,8 +647,8 @@ async function loadAndVerifyFile(cid) {
     `;
     gatewayStatusDiv.appendChild(gatewayItem);
 
-    try {
-      const url = gateway + cid;
+  try {
+    const url = gateway + cid;
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -528,19 +664,17 @@ async function loadAndVerifyFile(cid) {
         }
       }
 
-      // Download the content
-      const text = await response.text();
+      // Download as arrayBuffer so binary (e.g. zip) bytes are preserved; UTF-8 decoding would corrupt hash
+      const arrayBuffer = await response.arrayBuffer();
       
-      // Check actual downloaded size
-      const actualSize = new Blob([text]).size;
-      if (actualSize > MAX_FILE_SIZE) {
-        throw new Error(`File too large: ${(actualSize / 1024 / 1024).toFixed(2)}MB (max ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
+      if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
+        throw new Error(`File too large: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB (max ${MAX_FILE_SIZE / 1024 / 1024}MB)`);
       }
 
       gatewayItem.className = 'gateway-item success';
       gatewayItem.querySelector('.gateway-progress').textContent = 'Downloaded successfully';
       
-      return { gateway: gatewayName, content: text, success: true };
+      return { gateway: gatewayName, content: arrayBuffer, success: true };
     } catch (error) {
       gatewayItem.className = 'gateway-item error';
       gatewayItem.querySelector('.gateway-progress').textContent = `Error: ${error.message}`;
@@ -559,12 +693,16 @@ async function loadAndVerifyFile(cid) {
   const verificationDiv = document.getElementById('verification-status');
   verificationDiv.innerHTML = '<h4>Verification Steps</h4>';
 
-  // Step 1: Compare gateway downloads
+  const isBundle = !!pendingDsoulEntry?.is_bundle;
+
+  // Step 1: Compare gateway downloads (binary comparison for arrayBuffers)
   const firstContent = successfulDownloads[0].content;
   let allMatch = true;
   
   for (let i = 1; i < successfulDownloads.length; i++) {
-    if (successfulDownloads[i].content !== firstContent) {
+    const a = firstContent;
+    const b = successfulDownloads[i].content;
+    if (a.byteLength !== b.byteLength || !arrayBuffersEqual(a, b)) {
       allMatch = false;
       break;
     }
@@ -584,14 +722,14 @@ async function loadAndVerifyFile(cid) {
     throw new Error('Files from different gateways do not match');
   }
 
-  // Step 2: Validate skill header (if present)
+  // Step 2: Validate skill header (or bundle)
   const skillHeaderStep = document.createElement('div');
   skillHeaderStep.className = 'verification-step';
-  const skillMetadata = parseSkillHeader(firstContent);
+  const skillMetadata = isBundle ? null : parseSkillHeader(new TextDecoder().decode(firstContent));
   skillHeaderStep.innerHTML = `
-    <input type="checkbox" ${skillMetadata ? 'checked' : ''} disabled>
+    <input type="checkbox" ${(isBundle || skillMetadata) ? 'checked' : ''} disabled>
     <div class="verification-step-label">
-      ${skillMetadata ? 'Valid skill header found' : 'No skill header found (file may not be a skill)'}
+      ${isBundle ? 'Bundle (zip) – no skill header check' : (skillMetadata ? 'Valid skill header found' : 'No skill header found (file may not be a skill)')}
     </div>
   `;
   verificationDiv.appendChild(skillHeaderStep);
@@ -628,9 +766,10 @@ async function loadAndVerifyFile(cid) {
 
     // Store verified content for installation
     verifiedFileContent = firstContent;
+    verifiedFileIsBundle = isBundle;
 
-    // Parse skill header if present for display
-    const skillMetadata = parseSkillHeader(firstContent);
+    // Parse skill header if present for display (bundles have no single text content)
+    const skillMetadata = isBundle ? null : parseSkillHeader(new TextDecoder().decode(firstContent));
     
     // Show install section
     const installSection = document.getElementById('install-section');
@@ -701,9 +840,9 @@ async function loadFileTree() {
   const fileTree = document.getElementById('file-tree');
   fileTree.innerHTML = '';
 
-  // Parse skill metadata for files that don't have it (backward compatibility)
+  // Parse skill metadata for files that don't have it (backward compatibility; bundles have no content)
   for (const file of files) {
-    if (!file.skillMetadata && file.content) {
+    if (!file.skillMetadata && file.content && !file.is_bundle) {
       file.skillMetadata = parseSkillHeader(file.content);
       // Update file if metadata was found
       if (file.skillMetadata) {
@@ -845,7 +984,29 @@ function createFileItem(file) {
     ? `${file.skillMetadata.name} (${file.cid})${file.active ? ' - Active' : ''}`
     : file.cid + (file.active ? ' (Active)' : '');
   
-  fileItem.textContent = displayName;
+  const hasUpdate = nextCidsByCid.has(file.cid);
+  const nextCid = nextCidsByCid.get(file.cid);
+
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'file-item-label';
+  labelSpan.textContent = displayName;
+  labelSpan.title = displayTitle;
+  labelSpan.dataset.cid = file.cid;
+  fileItem.appendChild(labelSpan);
+
+  if (hasUpdate && nextCid) {
+    const updateBtn = document.createElement('button');
+    updateBtn.type = 'button';
+    updateBtn.className = 'file-item-update-btn';
+    updateBtn.textContent = 'Update';
+    updateBtn.title = 'Download newer version';
+    updateBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      loadCidInPanel(nextCid);
+    });
+    fileItem.appendChild(updateBtn);
+  }
+
   fileItem.title = displayTitle;
   fileItem.dataset.cid = file.cid;
 
@@ -855,12 +1016,13 @@ function createFileItem(file) {
   });
 
   fileItem.addEventListener('click', async (e) => {
+    // Don't select when clicking the Update button
+    if (e.target.classList.contains('file-item-update-btn')) return;
     // Remove previous selection
     document.querySelectorAll('.file-item').forEach(item => {
       item.classList.remove('selected');
     });
     fileItem.classList.add('selected');
-    
     await showFilePreview(file.cid);
   });
 
@@ -889,8 +1051,8 @@ async function showFilePreview(cid) {
     return;
   }
 
-  // Parse skill metadata if not already present (for backward compatibility)
-  if (!file.skillMetadata && file.content) {
+  // Parse skill metadata if not already present (for backward compatibility; bundles have no content)
+  if (!file.skillMetadata && file.content && !file.is_bundle) {
     file.skillMetadata = parseSkillHeader(file.content);
     // Update file if metadata was found
     if (file.skillMetadata) {
@@ -908,7 +1070,31 @@ async function showFilePreview(cid) {
   document.getElementById('loading-panel').classList.add('hidden');
   document.getElementById('file-preview').classList.remove('hidden');
 
+  // Reset full JSON section when switching file
+  const fullJsonPre = document.getElementById('full-json-content');
+  const viewFullJsonBtn = document.getElementById('view-full-json-btn');
+  if (fullJsonPre) fullJsonPre.classList.add('hidden');
+  if (viewFullJsonBtn) viewFullJsonBtn.textContent = 'View full JSON';
+
   renderPreviewHeaderAndMetadata(file, cid);
+
+  // Show/hide previous/next version buttons based on dsoulEntry
+  const downloadPrevBtn = document.getElementById('download-prev-btn');
+  const updateAvailableBtn = document.getElementById('update-available-btn');
+  if (downloadPrevBtn) {
+    if (file.dsoulEntry?.prev_cid) {
+      downloadPrevBtn.classList.remove('hidden');
+    } else {
+      downloadPrevBtn.classList.add('hidden');
+    }
+  }
+  if (updateAvailableBtn) {
+    if (file.dsoulEntry?.next_cid) {
+      updateAvailableBtn.classList.remove('hidden');
+    } else {
+      updateAvailableBtn.classList.add('hidden');
+    }
+  }
 
   // Update blockchain verify link with CID and trigger render
   const previewClverify = document.getElementById('preview-clverify');
@@ -938,8 +1124,10 @@ async function showFilePreview(cid) {
     }
   }
 
-  // Set preview content
-  document.getElementById('preview-content').textContent = file.content;
+  // Set preview content (bundles have no text content)
+  document.getElementById('preview-content').textContent = file.is_bundle
+    ? 'Bundle (zip). Contains Skill.MD, License.MD and supporting files.'
+    : (file.content || '');
 
   await updateCidDisplay(cid);
 
@@ -1033,6 +1221,7 @@ function renderPreviewHeaderAndMetadata(file, cid) {
 async function ensureDsoulEntry(cid, file) {
   try {
     const result = await window.electronAPI.fetchDsoulByCid(cid);
+    dsoulApiResponseByCid.set(cid, result);
     const entries = result.success && Array.isArray(result.data) ? result.data : [];
     if (entries.length === 0) return;
     const chosen = await showDsoulDisambiguationModal(entries, null);
@@ -1118,7 +1307,9 @@ async function updateCidDisplay(cid) {
   if (!file) return;
 
   try {
-    const hashResult = await window.electronAPI.calculateHash(file.content);
+    const hashResult = file.is_bundle
+      ? await window.electronAPI.hashFileFromPath(cid)
+      : await window.electronAPI.calculateHash(file.content);
     if (!hashResult.success) {
       throw new Error(hashResult.error);
     }
@@ -1149,6 +1340,7 @@ async function handleReverify() {
   isLoading = true;
   currentLoadCid = cid;
   verifiedFileContent = null;
+  verifiedFileIsBundle = false;
 
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');

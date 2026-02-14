@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getFiles: () => ipcRenderer.invoke('get-files'),
-  saveFile: (fileData) => ipcRenderer.invoke('save-file', fileData),
+  saveFile: (fileData, zipBuffer) => ipcRenderer.invoke('save-file', fileData, zipBuffer),
+  hashFileFromPath: (cid) => ipcRenderer.invoke('hash-file-from-path', cid),
   deleteFile: (cid) => ipcRenderer.invoke('delete-file', cid),
   readFile: (cid) => ipcRenderer.invoke('read-file', cid),
   updateFileTags: (cid, tags) => ipcRenderer.invoke('update-file-tags', cid, tags),

@@ -22,6 +22,7 @@
       <div class="sidebar">
         <div class="sidebar-header">
           <h2>Files</h2>
+          <button id="scan-updates-btn" class="scan-updates-btn" title="Check each skill for a newer version">Scan for updates</button>
         </div>
         <div id="file-tree" class="file-tree"></div>
       </div>
@@ -51,6 +52,8 @@
               <div id="preview-tags" class="preview-tags hidden"></div>
             </div>
             <div class="preview-actions">
+              <button id="download-prev-btn" class="version-btn download-prev-btn hidden" title="Download and install the previous version">Download previous version</button>
+              <button id="update-available-btn" class="version-btn update-available-btn hidden" title="Download and install the newer version">Update available</button>
               <button id="reverify-btn" class="reverify-btn">Reverify</button>
               <a id="preview-clverify" cid="" mode="dark" global="true" gateway="https://chainletter.mypinata.cloud/ipfs/" api="staging-verify.clstamp.com" logo="true" class="blockchain-verify-btn">Blockchain Verify</a>
             </div>
@@ -58,6 +61,13 @@
           <div id="skill-metadata" class="skill-metadata hidden"></div>
           <div id="preview-content" class="preview-content"></div>
           <div id="cid-display" class="cid-display"></div>
+          <div id="full-json-section" class="full-json-section">
+            <div class="full-json-actions">
+              <button id="view-full-json-btn" class="view-full-json-btn">View full JSON</button>
+              <button id="refresh-json-btn" class="refresh-json-btn" title="Re-fetch from DSOUL API and update">Refresh</button>
+            </div>
+            <pre id="full-json-content" class="full-json-content hidden"></pre>
+          </div>
         </div>
 
         <div id="empty-state" class="empty-state">

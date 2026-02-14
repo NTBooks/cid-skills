@@ -1,8 +1,10 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const os = require('os');
 const Hash = require('ipfs-only-hash');
+const yauzl = require('yauzl');
 
 const defaultDsoulUrlTemplate = 'https://dsoul.org/wp-json/diamond-soul/v1/search_by_cid?cid={CID}';
 
@@ -98,15 +100,28 @@ app.on('window-all-closed', () => {
 // IPC handlers
 ipcMain.handle('get-files', async () => {
   try {
-    const files = await fs.readdir(dataDir);
-    const fileData = await Promise.all(
-      files
-        .filter(f => f.endsWith('.json'))
-        .map(async (file) => {
-          const content = await fs.readFile(path.join(dataDir, file), 'utf-8');
-          return JSON.parse(content);
-        })
+    let files;
+    try {
+      files = await fs.readdir(dataDir);
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+    const results = await Promise.allSettled(
+      jsonFiles.map(async (file) => {
+        const content = await fs.readFile(path.join(dataDir, file), 'utf-8');
+        return JSON.parse(content);
+      })
     );
+    const fileData = [];
+    results.forEach((result, i) => {
+      if (result.status === 'fulfilled' && result.value && result.value.cid) {
+        fileData.push(result.value);
+      } else if (result.status === 'rejected') {
+        console.warn('Skipping invalid file:', jsonFiles[i], result.reason?.message || result.reason);
+      }
+    });
     return fileData;
   } catch (error) {
     console.error('Error reading files:', error);
@@ -114,11 +129,18 @@ ipcMain.handle('get-files', async () => {
   }
 });
 
-ipcMain.handle('save-file', async (event, fileData) => {
+ipcMain.handle('save-file', async (event, fileData, zipBuffer) => {
   try {
-    const filename = `${fileData.cid}.json`;
+    const cid = fileData.cid;
+    if (fileData.is_bundle && zipBuffer) {
+      const zipPath = path.join(dataDir, `${cid}.zip`);
+      const buf = Buffer.from(zipBuffer);
+      await fs.writeFile(zipPath, buf);
+    }
+    const toSave = fileData.is_bundle ? { ...fileData, content: undefined } : { ...fileData };
+    const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
-    await fs.writeFile(filepath, JSON.stringify(fileData, null, 2), 'utf-8');
+    await fs.writeFile(filepath, JSON.stringify(toSave, null, 2), 'utf-8');
     return { success: true };
   } catch (error) {
     console.error('Error saving file:', error);
@@ -130,7 +152,20 @@ ipcMain.handle('delete-file', async (event, cid) => {
   try {
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
+    let fileData = null;
+    try {
+      const content = await fs.readFile(filepath, 'utf-8');
+      fileData = JSON.parse(content);
+    } catch (_) {}
     await fs.unlink(filepath);
+    if (fileData && fileData.is_bundle) {
+      const zipPath = path.join(dataDir, `${cid}.zip`);
+      try {
+        await fs.unlink(zipPath);
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+    }
     return { success: true };
   } catch (error) {
     console.error('Error deleting file:', error);
@@ -145,6 +180,7 @@ ipcMain.handle('read-file', async (event, cid) => {
     const content = await fs.readFile(filepath, 'utf-8');
     return JSON.parse(content);
   } catch (error) {
+    if (error.code === 'ENOENT') return null;
     console.error('Error reading file:', error);
     return null;
   }
@@ -167,8 +203,14 @@ ipcMain.handle('update-file-tags', async (event, cid, tags) => {
 
 ipcMain.handle('calculate-hash', async (event, content) => {
   try {
-    // Convert string to Buffer if needed, Hash.of accepts string or Buffer
-    const hash = await Hash.of(content);
+    // IPFS CID is hash of raw bytes. For binary (e.g. zip) we must hash Buffer/Uint8Array, not UTF-8 decoded string.
+    let input = content;
+    if (content && typeof content.buffer === 'object' && content.buffer instanceof ArrayBuffer) {
+      input = Buffer.from(content);
+    } else if (content && content instanceof ArrayBuffer) {
+      input = Buffer.from(content);
+    }
+    const hash = await Hash.of(input);
     return { success: true, hash };
   } catch (error) {
     console.error('Error calculating hash:', error);
@@ -250,32 +292,78 @@ ipcMain.handle('open-skills-folder', async () => {
   return { success: true };
 });
 
+function extractEntryToFileNoOverwrite(zipfile, entry, destDir) {
+  return new Promise((resolve, reject) => {
+    const destPath = path.join(destDir, entry.fileName);
+    if (/\/$/.test(entry.fileName)) {
+      fs.mkdir(destPath, { recursive: true }).then(() => resolve(), reject);
+      return;
+    }
+    fs.stat(destPath).then(() => resolve(), (e) => {
+      if (e.code !== 'ENOENT') { resolve(); return; }
+      fs.mkdir(path.dirname(destPath), { recursive: true }).then(() => {
+        zipfile.openReadStream(entry, (err, readStream) => {
+          if (err) return reject(err);
+          const writeStream = fsSync.createWriteStream(destPath);
+          readStream.pipe(writeStream);
+          writeStream.on('finish', resolve);
+          writeStream.on('error', reject);
+        });
+      }).catch(reject);
+    });
+  });
+}
+
 // File activation handlers
 ipcMain.handle('activate-file', async (event, cid) => {
   try {
-    // Read file data
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
     const content = await fs.readFile(filepath, 'utf-8');
     const fileData = JSON.parse(content);
-    
-    // Load settings to get skills folder
+
     const settings = await loadSettings();
     if (!settings.skillsFolder) {
       return { success: false, error: 'Skills folder not set. Please configure it in Options.' };
     }
-    
-    // Ensure skills folder exists
+
     await fs.mkdir(settings.skillsFolder, { recursive: true });
-    
-    // Write file as {CID}.MD
-    const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
-    await fs.writeFile(skillsFilePath, fileData.content, 'utf-8');
-    
-    // Update file data to mark as active
+
+    if (fileData.is_bundle) {
+      const zipPath = path.join(dataDir, `${cid}.zip`);
+      await new Promise((resolve, reject) => {
+        let pending = 0;
+        let ended = false;
+        function maybeDone() {
+          if (ended && pending === 0) {
+            zipfile.close();
+            resolve();
+          }
+        }
+        yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+          if (err) return reject(err);
+          zipfile.on('entry', (entry) => {
+            pending++;
+            extractEntryToFileNoOverwrite(zipfile, entry, settings.skillsFolder).then(() => {
+              pending--;
+              maybeDone();
+            }, reject);
+          });
+          zipfile.on('end', () => {
+            ended = true;
+            maybeDone();
+          });
+          zipfile.on('error', reject);
+        });
+      });
+    } else {
+      const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
+      await fs.writeFile(skillsFilePath, fileData.content, 'utf-8');
+    }
+
     fileData.active = true;
     await fs.writeFile(filepath, JSON.stringify(fileData, null, 2), 'utf-8');
-    
+
     return { success: true };
   } catch (error) {
     console.error('Error activating file:', error);
@@ -283,33 +371,65 @@ ipcMain.handle('activate-file', async (event, cid) => {
   }
 });
 
+ipcMain.handle('hash-file-from-path', async (event, cid) => {
+  try {
+    const zipPath = path.join(dataDir, `${cid}.zip`);
+    const buf = await fs.readFile(zipPath);
+    const hash = await Hash.of(buf);
+    return { success: true, hash };
+  } catch (error) {
+    console.error('Error hashing file from path:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('deactivate-file', async (event, cid) => {
   try {
-    // Load settings to get skills folder
     const settings = await loadSettings();
     if (!settings.skillsFolder) {
       return { success: false, error: 'Skills folder not set.' };
     }
-    
-    // Remove file from skills folder
-    const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
-    try {
-      await fs.unlink(skillsFilePath);
-    } catch (error) {
-      // File might not exist, that's okay
-      if (error.code !== 'ENOENT') {
-        throw error;
-      }
-    }
-    
-    // Update file data to mark as inactive
+
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
     const content = await fs.readFile(filepath, 'utf-8');
     const fileData = JSON.parse(content);
+
+    if (fileData.is_bundle) {
+      const zipPath = path.join(dataDir, `${cid}.zip`);
+      const entries = await new Promise((resolve, reject) => {
+        const list = [];
+        yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+          if (err) return reject(err);
+          zipfile.on('entry', (entry) => list.push(entry.fileName));
+          zipfile.on('end', () => {
+            zipfile.close();
+            resolve(list);
+          });
+          zipfile.on('error', reject);
+        });
+      });
+      for (const fileName of entries) {
+        if (/\/$/.test(fileName)) continue;
+        const fullPath = path.join(settings.skillsFolder, fileName);
+        try {
+          await fs.unlink(fullPath);
+        } catch (e) {
+          if (e.code !== 'ENOENT') throw e;
+        }
+      }
+    } else {
+      const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
+      try {
+        await fs.unlink(skillsFilePath);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+
     fileData.active = false;
     await fs.writeFile(filepath, JSON.stringify(fileData, null, 2), 'utf-8');
-    
+
     return { success: true };
   } catch (error) {
     console.error('Error deactivating file:', error);
