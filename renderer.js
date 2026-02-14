@@ -11,6 +11,7 @@ const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB in bytes
 
 // Parse YAML frontmatter from skill file, or infer from markdown
 function parseSkillHeader(content) {
+  if (typeof content !== 'string') return null;
   // First, try to parse YAML frontmatter
   const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
   const match = content.match(frontmatterRegex);
@@ -351,6 +352,26 @@ function setupEventListeners() {
   const refreshJsonBtn = document.getElementById('refresh-json-btn');
   if (viewFullJsonBtn) viewFullJsonBtn.addEventListener('click', handleViewFullJson);
   if (refreshJsonBtn) refreshJsonBtn.addEventListener('click', handleRefreshJson);
+
+  // License modal (bundle License.MD popup)
+  const licenseModal = document.getElementById('license-modal');
+  const licenseModalContent = document.getElementById('license-modal-content');
+  const licenseModalClose = document.getElementById('license-modal-close');
+  if (licenseModalClose) {
+    licenseModalClose.addEventListener('click', () => {
+      if (licenseModal) licenseModal.classList.add('hidden');
+    });
+  }
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.license-popup-btn');
+    if (!btn || !licenseModal || !licenseModalContent) return;
+    const cid = btn.getAttribute('data-cid');
+    if (!cid) return;
+    licenseModalContent.textContent = 'Loading…';
+    licenseModal.classList.remove('hidden');
+    const result = await window.electronAPI.getBundleLicenseContent(cid);
+    licenseModalContent.textContent = result.success && result.content ? result.content : (result.error || 'Could not load license.');
+  });
 }
 
 // Store verified file content temporarily (string for skills, ArrayBuffer for bundles)
@@ -383,7 +404,7 @@ async function handleInstall() {
     const fileData = {
       cid,
       content: isBundle ? undefined : verifiedFileContent,
-      is_bundle: isBundle || undefined,
+      is_skill_bundle: isBundle || undefined,
       tags: existing?.tags ?? [],
       active: existing?.active ?? false,
       skillMetadata: skillMetadata || null,
@@ -693,7 +714,7 @@ async function loadAndVerifyFile(cid) {
   const verificationDiv = document.getElementById('verification-status');
   verificationDiv.innerHTML = '<h4>Verification Steps</h4>';
 
-  const isBundle = !!pendingDsoulEntry?.is_bundle;
+  const isBundle = !!(pendingDsoulEntry?.is_skill_bundle ?? pendingDsoulEntry?.is_bundle);
 
   // Step 1: Compare gateway downloads (binary comparison for arrayBuffers)
   const firstContent = successfulDownloads[0].content;
@@ -840,14 +861,28 @@ async function loadFileTree() {
   const fileTree = document.getElementById('file-tree');
   fileTree.innerHTML = '';
 
-  // Parse skill metadata for files that don't have it (backward compatibility; bundles have no content)
+  // Parse skill metadata for files that don't have it (backward compatibility; bundles: read from zip)
   for (const file of files) {
-    if (!file.skillMetadata && file.content && !file.is_bundle) {
+    if (file.skillMetadata) continue;
+    if (file.is_skill_bundle ?? file.is_bundle) {
+      const result = await window.electronAPI.getBundleSkillContent(file.cid);
+      if (result.success && result.content) {
+        file.skillMetadata = parseSkillHeader(result.content);
+        if (file.skillMetadata) {
+          await window.electronAPI.saveFile(file);
+        }
+      }
+    } else if (typeof file.content === 'string') {
       file.skillMetadata = parseSkillHeader(file.content);
-      // Update file if metadata was found
       if (file.skillMetadata) {
         await window.electronAPI.saveFile(file);
       }
+    }
+  }
+  // Normalize: ensure is_skill_bundle is set for legacy is_bundle
+  for (const file of files) {
+    if (file.is_bundle && file.is_skill_bundle === undefined) {
+      file.is_skill_bundle = true;
     }
   }
 
@@ -1051,16 +1086,31 @@ async function showFilePreview(cid) {
     return;
   }
 
-  // Parse skill metadata if not already present (for backward compatibility; bundles have no content)
-  if (!file.skillMetadata && file.content && !file.is_bundle) {
-    file.skillMetadata = parseSkillHeader(file.content);
-    // Update file if metadata was found
-    if (file.skillMetadata) {
-      const updateResult = await window.electronAPI.saveFile(file);
-      if (!updateResult.success) {
-        console.warn('Failed to update file with skill metadata');
+  let bundleSkillContent = null;
+  // Parse skill metadata if not already present (bundles: read Skill.MD from zip)
+  if (!file.skillMetadata) {
+    if (file.is_skill_bundle ?? file.is_bundle) {
+      const result = await window.electronAPI.getBundleSkillContent(cid);
+      if (result.success && result.content) {
+        bundleSkillContent = result.content;
+        file.skillMetadata = parseSkillHeader(result.content);
+        if (file.skillMetadata) {
+          await window.electronAPI.saveFile(file);
+        }
+      }
+    } else if (typeof file.content === 'string') {
+      file.skillMetadata = parseSkillHeader(file.content);
+      if (file.skillMetadata) {
+        const updateResult = await window.electronAPI.saveFile(file);
+        if (!updateResult.success) {
+          console.warn('Failed to update file with skill metadata');
+        }
       }
     }
+  }
+  if ((file.is_skill_bundle ?? file.is_bundle) && !bundleSkillContent) {
+    const result = await window.electronAPI.getBundleSkillContent(cid);
+    if (result.success && result.content) bundleSkillContent = result.content;
   }
 
   currentFile = file;
@@ -1124,9 +1174,9 @@ async function showFilePreview(cid) {
     }
   }
 
-  // Set preview content (bundles have no text content)
-  document.getElementById('preview-content').textContent = file.is_bundle
-    ? 'Bundle (zip). Contains Skill.MD, License.MD and supporting files.'
+  // Set preview content (bundles: show Skill.MD content like normal skills)
+  document.getElementById('preview-content').textContent = (file.is_skill_bundle ?? file.is_bundle)
+    ? (bundleSkillContent || '')
     : (file.content || '');
 
   await updateCidDisplay(cid);
@@ -1200,10 +1250,17 @@ function renderPreviewHeaderAndMetadata(file, cid) {
       metadataHtml += `<div class="metadata-item"><strong>Download:</strong> <a href="${escapeHtml(e.download_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.download_url)}</a></div>`;
       hasAny = true;
     }
-    if (e.license_url) {
+    if (file.is_skill_bundle ?? file.is_bundle) {
+      metadataHtml += `<div class="metadata-item"><strong>License:</strong> <button type="button" class="license-popup-btn" data-cid="${escapeHtml(cid)}">View License</button></div>`;
+      hasAny = true;
+    } else if (e.license_url) {
       metadataHtml += `<div class="metadata-item"><strong>License:</strong> <a href="${escapeHtml(e.license_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.license_url)}</a></div>`;
       hasAny = true;
     }
+  }
+  if ((file.is_skill_bundle ?? file.is_bundle) && !file.dsoulEntry) {
+    metadataHtml += `<div class="metadata-item"><strong>License:</strong> <button type="button" class="license-popup-btn" data-cid="${escapeHtml(cid)}">View License</button></div>`;
+    hasAny = true;
   }
 
   metadataHtml += '</div>';
@@ -1307,7 +1364,7 @@ async function updateCidDisplay(cid) {
   if (!file) return;
 
   try {
-    const hashResult = file.is_bundle
+    const hashResult = (file.is_skill_bundle ?? file.is_bundle)
       ? await window.electronAPI.hashFileFromPath(cid)
       : await window.electronAPI.calculateHash(file.content);
     if (!hashResult.success) {

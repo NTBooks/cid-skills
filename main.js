@@ -132,12 +132,13 @@ ipcMain.handle('get-files', async () => {
 ipcMain.handle('save-file', async (event, fileData, zipBuffer) => {
   try {
     const cid = fileData.cid;
-    if (fileData.is_bundle && zipBuffer) {
+    const isBundle = fileData.is_skill_bundle || fileData.is_bundle;
+    if (isBundle && zipBuffer) {
       const zipPath = path.join(dataDir, `${cid}.zip`);
       const buf = Buffer.from(zipBuffer);
       await fs.writeFile(zipPath, buf);
     }
-    const toSave = fileData.is_bundle ? { ...fileData, content: undefined } : { ...fileData };
+    const toSave = isBundle ? { ...fileData, content: undefined } : { ...fileData };
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
     await fs.writeFile(filepath, JSON.stringify(toSave, null, 2), 'utf-8');
@@ -158,7 +159,7 @@ ipcMain.handle('delete-file', async (event, cid) => {
       fileData = JSON.parse(content);
     } catch (_) {}
     await fs.unlink(filepath);
-    if (fileData && fileData.is_bundle) {
+    if (fileData && (fileData.is_skill_bundle || fileData.is_bundle)) {
       const zipPath = path.join(dataDir, `${cid}.zip`);
       try {
         await fs.unlink(zipPath);
@@ -292,11 +293,40 @@ ipcMain.handle('open-skills-folder', async () => {
   return { success: true };
 });
 
-function extractEntryToFileNoOverwrite(zipfile, entry, destDir) {
+/** Returns a file-safe folder name: trimmed, invalid path chars replaced with underscore, collapsed. */
+function getFileSafeSkillName(fileData) {
+  let raw = (fileData.skillMetadata?.name || fileData.dsoulEntry?.name || fileData.cid || 'skill').trim();
+  raw = raw.replace(/\.zip$/i, '').trim() || raw;
+  const safe = raw.replace(/[\s\\/:*?"<>|]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'skill';
+  return safe;
+}
+
+/** Returns skillDir path and final folder name, adding _1, _2, ... if base name already exists. */
+async function getSkillDirNoConflict(skillsFolder, fileSafeName) {
+  let name = fileSafeName;
+  let dir = path.join(skillsFolder, name);
+  let n = 0;
+  while (true) {
+    try {
+      await fs.access(dir);
+      n++;
+      name = `${fileSafeName}_${n}`;
+      dir = path.join(skillsFolder, name);
+    } catch (e) {
+      if (e.code === 'ENOENT') break;
+      throw e;
+    }
+  }
+  return { skillDir: dir, folderName: name };
+}
+
+function extractEntryToFileNoOverwrite(zipfile, entry, destDir, destFileNameOverride) {
+  const destFileName = destFileNameOverride != null ? destFileNameOverride : entry.fileName;
   return new Promise((resolve, reject) => {
-    const destPath = path.join(destDir, entry.fileName);
+    const destPath = path.join(destDir, destFileName);
     if (/\/$/.test(entry.fileName)) {
-      fs.mkdir(destPath, { recursive: true }).then(() => resolve(), reject);
+      const dirPath = path.join(destDir, entry.fileName);
+      fs.mkdir(dirPath, { recursive: true }).then(() => resolve(), reject);
       return;
     }
     fs.stat(destPath).then(() => resolve(), (e) => {
@@ -327,41 +357,42 @@ ipcMain.handle('activate-file', async (event, cid) => {
       return { success: false, error: 'Skills folder not set. Please configure it in Options.' };
     }
 
-    await fs.mkdir(settings.skillsFolder, { recursive: true });
+    const fileSafeName = getFileSafeSkillName(fileData);
+    const { skillDir, folderName } = await getSkillDirNoConflict(settings.skillsFolder, fileSafeName);
+    await fs.mkdir(skillDir, { recursive: true });
 
-    if (fileData.is_bundle) {
+    if (fileData.is_skill_bundle || fileData.is_bundle) {
       const zipPath = path.join(dataDir, `${cid}.zip`);
       await new Promise((resolve, reject) => {
-        let pending = 0;
-        let ended = false;
-        function maybeDone() {
-          if (ended && pending === 0) {
-            zipfile.close();
-            resolve();
-          }
-        }
-        yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+        let resolved = false;
+        yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
           if (err) return reject(err);
           zipfile.on('entry', (entry) => {
-            pending++;
-            extractEntryToFileNoOverwrite(zipfile, entry, settings.skillsFolder).then(() => {
-              pending--;
-              maybeDone();
-            }, reject);
+            const baseLower = path.basename(entry.fileName).replace(/\/$/, '').toLowerCase();
+            const mainAsSkillMd = baseLower === 'skill.md' ? 'skill.md' : null;
+            extractEntryToFileNoOverwrite(zipfile, entry, skillDir, mainAsSkillMd).then(() => {
+              zipfile.readEntry();
+            }, (e) => {
+              if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) {} reject(e); }
+            });
           });
           zipfile.on('end', () => {
-            ended = true;
-            maybeDone();
+            if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) {} resolve(); }
           });
-          zipfile.on('error', reject);
+          zipfile.on('error', (e) => {
+            if (e && (e.message === 'closed' || e.message === 'Closed')) return;
+            if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) {} reject(e); }
+          });
+          zipfile.readEntry();
         });
       });
     } else {
-      const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
-      await fs.writeFile(skillsFilePath, fileData.content, 'utf-8');
+      const skillMdPath = path.join(skillDir, 'skill.md');
+      await fs.writeFile(skillMdPath, fileData.content, 'utf-8');
     }
 
     fileData.active = true;
+    fileData.activatedFolderName = folderName;
     await fs.writeFile(filepath, JSON.stringify(fileData, null, 2), 'utf-8');
 
     return { success: true };
@@ -383,6 +414,102 @@ ipcMain.handle('hash-file-from-path', async (event, cid) => {
   }
 });
 
+/** Find and read first zip entry whose basename matches entryFileName (case-insensitive). */
+function readEntryFromZip(zipPath, entryFileName) {
+  return new Promise((resolve, reject) => {
+    const targetName = (entryFileName || '').toString().toLowerCase();
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          zipfile.readEntry();
+          return;
+        }
+        const entryBase = path.basename(entry.fileName).replace(/\/$/, '').toLowerCase();
+        if (entryBase === targetName) {
+          zipfile.openReadStream(entry, (readErr, readStream) => {
+            if (readErr) { zipfile.close(); return reject(readErr); }
+            const chunks = [];
+            readStream.on('data', (chunk) => chunks.push(chunk));
+            readStream.on('end', () => {
+              zipfile.close();
+              resolve(Buffer.concat(chunks).toString('utf-8'));
+            });
+            readStream.on('error', (e) => { zipfile.close(); reject(e); });
+          });
+        } else {
+          zipfile.readEntry();
+        }
+      });
+      zipfile.on('end', () => { zipfile.close(); resolve(null); });
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
+
+/** Find and read first zip file entry where predicate(entryFileName) is true. Path comparison is case-insensitive. */
+function readFirstEntryFromZipWhere(zipPath, predicate) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          zipfile.readEntry();
+          return;
+        }
+        const normalized = path.basename(entry.fileName).replace(/\/$/, '').toLowerCase();
+        if (predicate(entry.fileName, normalized)) {
+          zipfile.openReadStream(entry, (readErr, readStream) => {
+            if (readErr) { zipfile.close(); return reject(readErr); }
+            const chunks = [];
+            readStream.on('data', (chunk) => chunks.push(chunk));
+            readStream.on('end', () => {
+              zipfile.close();
+              resolve(Buffer.concat(chunks).toString('utf-8'));
+            });
+            readStream.on('error', (e) => { zipfile.close(); reject(e); });
+          });
+        } else {
+          zipfile.readEntry();
+        }
+      });
+      zipfile.on('end', () => { zipfile.close(); resolve(null); });
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
+
+ipcMain.handle('get-bundle-skill-content', async (event, cid) => {
+  try {
+    const zipPath = path.join(dataDir, `${cid}.zip`);
+    const content = await readEntryFromZip(zipPath, 'Skill.MD');
+    return { success: true, content };
+  } catch (error) {
+    console.error('Error reading bundle skill content:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/** License filenames to try (case-insensitive match against zip entry basename). */
+const LICENSE_ENTRY_NAMES = ['license.md', 'license', 'license.txt'];
+
+ipcMain.handle('get-bundle-license-content', async (event, cid) => {
+  try {
+    const zipPath = path.join(dataDir, `${cid}.zip`);
+    for (const name of LICENSE_ENTRY_NAMES) {
+      const content = await readEntryFromZip(zipPath, name);
+      if (content) return { success: true, content };
+    }
+    const content = await readFirstEntryFromZipWhere(zipPath, (_fileName, baseLower) => baseLower.includes('license'));
+    return { success: true, content };
+  } catch (error) {
+    console.error('Error reading bundle license content:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('deactivate-file', async (event, cid) => {
   try {
     const settings = await loadSettings();
@@ -395,35 +522,45 @@ ipcMain.handle('deactivate-file', async (event, cid) => {
     const content = await fs.readFile(filepath, 'utf-8');
     const fileData = JSON.parse(content);
 
-    if (fileData.is_bundle) {
-      const zipPath = path.join(dataDir, `${cid}.zip`);
-      const entries = await new Promise((resolve, reject) => {
-        const list = [];
-        yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
-          if (err) return reject(err);
-          zipfile.on('entry', (entry) => list.push(entry.fileName));
-          zipfile.on('end', () => {
-            zipfile.close();
-            resolve(list);
-          });
-          zipfile.on('error', reject);
-        });
-      });
-      for (const fileName of entries) {
-        if (/\/$/.test(fileName)) continue;
-        const fullPath = path.join(settings.skillsFolder, fileName);
-        try {
-          await fs.unlink(fullPath);
-        } catch (e) {
-          if (e.code !== 'ENOENT') throw e;
-        }
-      }
-    } else {
-      const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
+    if (fileData.activatedFolderName) {
+      const skillDir = path.join(settings.skillsFolder, fileData.activatedFolderName);
       try {
-        await fs.unlink(skillsFilePath);
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
+        await fs.rm(skillDir, { recursive: true, force: true });
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+      delete fileData.activatedFolderName;
+    } else {
+      if (fileData.is_skill_bundle || fileData.is_bundle) {
+        const zipPath = path.join(dataDir, `${cid}.zip`);
+        const entries = await new Promise((resolve, reject) => {
+          const list = [];
+          yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+            if (err) return reject(err);
+            zipfile.on('entry', (entry) => list.push(entry.fileName));
+            zipfile.on('end', () => {
+              zipfile.close();
+              resolve(list);
+            });
+            zipfile.on('error', reject);
+          });
+        });
+        for (const fileName of entries) {
+          if (/\/$/.test(fileName)) continue;
+          const fullPath = path.join(settings.skillsFolder, fileName);
+          try {
+            await fs.unlink(fullPath);
+          } catch (e) {
+            if (e.code !== 'ENOENT') throw e;
+          }
+        }
+      } else {
+        const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
+        try {
+          await fs.unlink(skillsFilePath);
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
       }
     }
 

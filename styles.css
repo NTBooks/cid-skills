@@ -749,6 +749,25 @@ body {
   font-size: 16px;
 }
 
+.license-modal-content {
+  min-width: 80ch;
+  max-width: 90vw;
+}
+
+.license-modal-body {
+  min-width: 80ch;
+  max-height: 70vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  background-color: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
 #tag-input {
   width: 100%;
   padding: 8px 12px;
