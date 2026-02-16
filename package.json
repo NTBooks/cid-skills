@@ -26,7 +26,7 @@
   "license": "MIT",
   "build": {
     "appId": "com.diamondsoul.downloader",
-    "productName": "Diamond Soul Downloader",
+    "productName": "DSoul",
     "directories": {
       "output": "dist"
     },
