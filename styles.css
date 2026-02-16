@@ -833,6 +833,61 @@ body {
   margin-bottom: 8px;
 }
 
+.ipfs-gateways-list {
+  margin-bottom: 8px;
+}
+
+.ipfs-gateway-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ipfs-gateway-row input {
+  flex: 1;
+  padding: 8px 10px;
+  background-color: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  color: #d4d4d4;
+  font-size: 13px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.ipfs-gateway-row input::placeholder {
+  color: #6e6e6e;
+}
+
+.ipfs-gateway-row .remove-gateway-btn {
+  padding: 6px 10px;
+  background-color: #3e3e42;
+  border: 1px solid #505050;
+  border-radius: 6px;
+  color: #d4d4d4;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ipfs-gateway-row .remove-gateway-btn:hover {
+  background-color: #505050;
+  border-color: #606060;
+}
+
+.add-gateway-btn {
+  padding: 6px 12px;
+  background-color: #0e639c;
+  border: 1px solid #1177bb;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.add-gateway-btn:hover {
+  background-color: #1177bb;
+}
+
 /* DSOUL provider: editable dark-mode text box */
 .dsoul-provider-input,
 #dsoul-provider-input {

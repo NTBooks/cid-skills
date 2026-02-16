@@ -1,5 +1,5 @@
-// IPFS gateways to try
-const IPFS_GATEWAYS = [
+// Default IPFS gateways when none configured in options
+const DEFAULT_IPFS_GATEWAYS = [
   'https://ipfs.io/ipfs/',
   'https://gateway.pinata.cloud/ipfs/',
   'https://dweb.link/ipfs/',
@@ -326,10 +326,56 @@ function setupEventListeners() {
   const dsoulProviderInput = document.getElementById('dsoul-provider-input');
   const toggleActiveBtn = document.getElementById('toggle-active');
 
+  const ipfsGatewaysList = document.getElementById('ipfs-gateways-list');
+  const addIpfsGatewayBtn = document.getElementById('add-ipfs-gateway-btn');
+
+  function renderIpfsGateways(urls) {
+    if (!ipfsGatewaysList) return;
+    ipfsGatewaysList.innerHTML = '';
+    const list = Array.isArray(urls) && urls.length > 0 ? urls : DEFAULT_IPFS_GATEWAYS.slice();
+    list.forEach((url) => {
+      const row = document.createElement('div');
+      row.className = 'ipfs-gateway-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'https://ipfs.io/ipfs/';
+      input.value = url;
+      input.classList.add('ipfs-gateway-url');
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'remove-gateway-btn';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => {
+        row.remove();
+      });
+      row.appendChild(input);
+      row.appendChild(removeBtn);
+      ipfsGatewaysList.appendChild(row);
+    });
+  }
+
+  addIpfsGatewayBtn.addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'ipfs-gateway-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'https://ipfs.io/ipfs/';
+    input.classList.add('ipfs-gateway-url');
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-gateway-btn';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => row.remove());
+    row.appendChild(input);
+    row.appendChild(removeBtn);
+    ipfsGatewaysList.appendChild(row);
+  });
+
   optionsBtn.addEventListener('click', async () => {
     await loadSettings();
     skillsFolderInput.value = currentSettings?.skillsFolder || '';
     dsoulProviderInput.value = currentSettings?.dsoulProviderUrl || '';
+    renderIpfsGateways(currentSettings?.ipfsGateways);
     optionsModal.classList.remove('hidden');
   });
 
@@ -338,9 +384,18 @@ function setupEventListeners() {
   });
 
   optionsSave.addEventListener('click', async () => {
+    const gatewayInputs = ipfsGatewaysList ? ipfsGatewaysList.querySelectorAll('.ipfs-gateway-url') : [];
+    const ipfsGateways = Array.from(gatewayInputs)
+      .map((el) => (el.value || '').trim())
+      .filter((s) => s.length > 0);
+    if (ipfsGateways.length === 0) {
+      alert('At least one IPFS gateway is required.');
+      return;
+    }
     const settings = {
       skillsFolder: skillsFolderInput.value,
-      dsoulProviderUrl: (dsoulProviderInput.value || '').trim()
+      dsoulProviderUrl: (dsoulProviderInput.value || '').trim(),
+      ipfsGateways
     };
     const result = await window.electronAPI.saveSettings(settings);
     if (result.success) {
@@ -685,13 +740,30 @@ function handleCancelLoad() {
   loadBtn.disabled = false;
 }
 
+function getIpfsGateways() {
+  const list = Array.isArray(currentSettings?.ipfsGateways) && currentSettings.ipfsGateways.length > 0
+    ? currentSettings.ipfsGateways
+    : DEFAULT_IPFS_GATEWAYS.slice();
+  return list.map((url) => {
+    const u = (url || '').trim();
+    return u.endsWith('/') ? u : u + '/';
+  });
+}
+
 async function loadAndVerifyFile(cid) {
+  if (!currentSettings) await loadSettings();
+  const gateways = getIpfsGateways();
+
   const gatewayStatusDiv = document.getElementById('gateway-status');
   gatewayStatusDiv.innerHTML = '<h4>Downloading from gateways...</h4>';
 
-  // Try to download from multiple gateways
-  const downloadPromises = IPFS_GATEWAYS.map(async (gateway) => {
-    const gatewayName = new URL(gateway).hostname;
+  const downloadPromises = gateways.map(async (gateway) => {
+    let gatewayName;
+    try {
+      gatewayName = new URL(gateway).hostname;
+    } catch (_) {
+      gatewayName = gateway;
+    }
     const gatewayItem = document.createElement('div');
     gatewayItem.className = 'gateway-item loading';
     gatewayItem.innerHTML = `
@@ -742,7 +814,6 @@ async function loadAndVerifyFile(cid) {
     throw new Error('Failed to download from all gateways');
   }
 
-  // Compare files from different gateways
   const verificationDiv = document.getElementById('verification-status');
   verificationDiv.innerHTML = '<h4>Verification Steps</h4>';
 
@@ -766,32 +837,36 @@ async function loadAndVerifyFile(cid) {
     validatedBundleSkillContent = validateResult.skillContent || null;
   }
 
-  // Step 1: Compare gateway downloads (binary comparison for arrayBuffers)
-  let allMatch = true;
-  for (let i = 1; i < successfulDownloads.length; i++) {
-    const a = firstContent;
-    const b = successfulDownloads[i].content;
-    if (a.byteLength !== b.byteLength || !arrayBuffersEqual(a, b)) {
-      allMatch = false;
-      break;
+  const singleGateway = successfulDownloads.length === 1;
+
+  if (!singleGateway) {
+    // Step 1: Compare gateway downloads (skip when only one gateway)
+    let allMatch = true;
+    for (let i = 1; i < successfulDownloads.length; i++) {
+      const a = firstContent;
+      const b = successfulDownloads[i].content;
+      if (a.byteLength !== b.byteLength || !arrayBuffersEqual(a, b)) {
+        allMatch = false;
+        break;
+      }
+    }
+
+    const compareStep = document.createElement('div');
+    compareStep.className = 'verification-step';
+    compareStep.innerHTML = `
+      <input type="checkbox" ${allMatch ? 'checked' : ''} disabled>
+      <div class="verification-step-label">
+        Files from ${successfulDownloads.length} gateway(s) match
+      </div>
+    `;
+    verificationDiv.appendChild(compareStep);
+
+    if (!allMatch) {
+      throw new Error('Files from different gateways do not match');
     }
   }
 
-  const compareStep = document.createElement('div');
-  compareStep.className = 'verification-step';
-  compareStep.innerHTML = `
-    <input type="checkbox" ${allMatch ? 'checked' : ''} disabled>
-    <div class="verification-step-label">
-      Files from ${successfulDownloads.length} gateway(s) match
-    </div>
-  `;
-  verificationDiv.appendChild(compareStep);
-
-  if (!allMatch) {
-    throw new Error('Files from different gateways do not match');
-  }
-
-  // Step 2: Validate skill header (or bundle)
+  // Step 2 (or Step 1 when single gateway): Validate skill header (or bundle)
   const skillHeaderStep = document.createElement('div');
   skillHeaderStep.className = 'verification-step';
   let skillMetadata = null;

@@ -135,6 +135,12 @@
         <p class="options-help">Host only (e.g. https://dsoul.org). The path /wp-json/diamond-soul/v1 is added by the app. Leave empty to use .env or default.</p>
       </div>
       <div class="options-section">
+        <label>IPFS gateways:</label>
+        <p class="options-help">URLs used to download content by CID. At least one required. With one gateway, multi-source comparison is skipped.</p>
+        <div id="ipfs-gateways-list" class="ipfs-gateways-list"></div>
+        <button type="button" id="add-ipfs-gateway-btn" class="add-gateway-btn">Add gateway</button>
+      </div>
+      <div class="options-section">
         <label for="skills-folder-input">Skills Folder:</label>
         <div class="folder-input-group">
           <input type="text" id="skills-folder-input" readonly placeholder="Select skills folder" />

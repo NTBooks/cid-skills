@@ -139,8 +139,8 @@ async function ensureDataDir() {
   }
 }
 
-// IPFS gateways and limits (used by CLI install)
-const IPFS_GATEWAYS = [
+// Default IPFS gateways (used when none configured)
+const DEFAULT_IPFS_GATEWAYS = [
   'https://ipfs.io/ipfs/',
   'https://gateway.pinata.cloud/ipfs/',
   'https://dweb.link/ipfs/',
@@ -193,8 +193,16 @@ async function runCliInstall(cid, options = {}, installRef) {
     const entry = entries.length === 1 ? entries[0] : entries.find((e) => e.cid === cid) || entries[0];
     const isBundle = !!(entry.is_skill_bundle ?? entry.is_bundle);
 
+    const settings = await loadSettings();
+    const gateways = Array.isArray(settings.ipfsGateways) && settings.ipfsGateways.length > 0
+      ? settings.ipfsGateways
+      : DEFAULT_IPFS_GATEWAYS;
+    const normalizedGateways = gateways.map((u) => {
+      const s = (u || '').trim();
+      return s.endsWith('/') ? s : s + '/';
+    });
     let content = null;
-    for (const gateway of IPFS_GATEWAYS) {
+    for (const gateway of normalizedGateways) {
       try {
         const gatewayUrl = gateway + cid;
         const response = await fetch(gatewayUrl);
@@ -243,7 +251,6 @@ async function runCliInstall(cid, options = {}, installRef) {
       return false;
     }
 
-    const settings = await loadSettings();
     const skillsFolder = options.skillsFolder != null
       ? options.skillsFolder
       : (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '');
@@ -621,9 +628,16 @@ async function loadSettings() {
     const settings = JSON.parse(content);
     settings.skillsFolder = settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
     settings.dsoulProviderUrl = settings.dsoulProviderUrl ?? '';
+    if (!Array.isArray(settings.ipfsGateways) || settings.ipfsGateways.length === 0) {
+      settings.ipfsGateways = DEFAULT_IPFS_GATEWAYS.slice();
+    }
     return settings;
   } catch (error) {
-    return { skillsFolder: process.env.DSOUL_SKILLS_FOLDER || '', dsoulProviderUrl: '' };
+    return {
+      skillsFolder: process.env.DSOUL_SKILLS_FOLDER || '',
+      dsoulProviderUrl: '',
+      ipfsGateways: DEFAULT_IPFS_GATEWAYS.slice()
+    };
   }
 }
 
