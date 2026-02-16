@@ -1484,6 +1484,7 @@ async function handleReverify() {
   try {
     // Fetch DSOUL list again and let user pick (pre-select current choice)
     const dsoulResult = await window.electronAPI.fetchDsoulByCid(cid);
+    dsoulApiResponseByCid.set(cid, dsoulResult);
     const entries = dsoulResult.success && Array.isArray(dsoulResult.data) ? dsoulResult.data : [];
     let chosen = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
     pendingDsoulEntry = chosen ? await ensureDsoulEntryLink(chosen) : null;
