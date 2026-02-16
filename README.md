@@ -105,11 +105,55 @@ npx diamond-soul-downloader install <cid-or-shortname>
 
 **Option 4: Run the built app with arguments**
 
-If you use the packaged app (e.g. "Diamond Soul Downloader.exe" on Windows), you can pass CLI arguments directly:
+If you use the packaged app (e.g. **DSoul.exe** on Windows), you can pass CLI arguments directly:
 
 ```bash
-"Diamond Soul Downloader.exe" install <cid-or-shortname>
+DSoul.exe install <cid-or-shortname>
 ```
+
+**Option 5: Add the Windows .exe to PATH (no npm)**
+
+If you use the built Windows app and don’t use npm, you can run the CLI from any folder by adding the app’s folder to your PATH:
+
+1. Build the app (e.g. run `npm run dist:win` or download a release). The executable is **DSoul.exe**.
+2. Note the folder that contains the .exe (e.g. `C:\Program Files\DSoul` if installed via the NSIS installer, or your project’s `dist\win-unpacked` folder if you only unpacked).
+3. Add that folder to your PATH:
+   - Open **Settings** → **System** → **About** → **Advanced system settings** (or search “environment variables”).
+   - Click **Environment Variables**.
+   - Under **User variables** or **System variables**, select **Path** → **Edit** → **New**, then paste the folder path (e.g. `C:\Program Files\DSoul`).
+   - Confirm with **OK**.
+4. Open a **new** Command Prompt or PowerShell and run:
+
+```bash
+DSoul.exe install <cid-or-shortname>
+```
+
+You can also create a short alias (e.g. `dsoul.cmd` that runs the exe with the same arguments) and put that script in a folder already on your PATH.
+
+**Option 6: Run the built app from Terminal on macOS (no npm)**
+
+If you use the built Mac app (`.app` bundle) and don’t use npm, you can run the CLI from Terminal:
+
+1. Build the app (e.g. run `npm run dist:mac` or download a release). The app is **Diamond Soul Downloader.app**.
+2. The executable inside the bundle is at **Diamond Soul Downloader.app/Contents/MacOS/Diamond Soul Downloader**. Run it with a full path, for example if the app is in Applications:
+
+```bash
+"/Applications/Diamond Soul Downloader.app/Contents/MacOS/Diamond Soul Downloader" install <cid-or-shortname>
+```
+
+3. To run it from any directory without typing the full path, create a symlink (e.g. as `dsoul`) in a folder that’s on your PATH (e.g. `/usr/local/bin`):
+
+```bash
+sudo ln -s "/Applications/Diamond Soul Downloader.app/Contents/MacOS/Diamond Soul Downloader" /usr/local/bin/dsoul
+```
+
+Then open a new Terminal and run:
+
+```bash
+dsoul install <cid-or-shortname>
+```
+
+If `/usr/local/bin` doesn’t exist, run `sudo mkdir -p /usr/local/bin`. If it isn’t in your PATH, add `export PATH="/usr/local/bin:$PATH"` to `~/.zshrc` (or `~/.bash_profile` on older Macs) and open a new Terminal.
 
 ### Commands
 
