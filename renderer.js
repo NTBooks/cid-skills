@@ -421,7 +421,7 @@ async function handleInstall() {
     const existing = await window.electronAPI.readFile(cid);
     const fileData = {
       cid,
-      content: isBundle ? undefined : verifiedFileContent,
+      content: isBundle ? undefined : contentStr,
       is_skill_bundle: isBundle || undefined,
       tags: existing?.tags ?? [],
       active: existing?.active ?? false,
@@ -549,13 +549,9 @@ async function handleViewFullJson() {
   if (!currentFile) return;
   const cid = currentFile.cid;
   if (pre.classList.contains('hidden')) {
-    let apiResponse = dsoulApiResponseByCid.get(cid);
-    if (apiResponse === undefined) {
-      const result = await window.electronAPI.fetchDsoulByCid(cid);
-      dsoulApiResponseByCid.set(cid, result);
-      apiResponse = result;
-    }
-    pre.textContent = JSON.stringify(apiResponse, null, 2);
+    const result = await window.electronAPI.fetchDsoulByCid(cid);
+    dsoulApiResponseByCid.set(cid, result);
+    pre.textContent = JSON.stringify(result, null, 2);
     pre.classList.remove('hidden');
     btn.textContent = 'Hide full JSON';
   } else {
@@ -576,11 +572,12 @@ async function handleRefreshJson() {
     if (entries.length === 0) {
       currentFile.dsoulEntry = null;
     } else {
-      const chosen = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
+      let chosen = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
+      if (chosen) chosen = await ensureDsoulEntryLink(chosen);
       currentFile.dsoulEntry = chosen;
     }
     await window.electronAPI.saveFile(currentFile);
-    renderPreviewHeaderAndMetadata(currentFile, cid);
+    await renderPreviewHeaderAndMetadata(currentFile, cid);
     const pre = document.getElementById('full-json-content');
     if (pre && !pre.classList.contains('hidden')) {
       pre.textContent = JSON.stringify(result, null, 2);
@@ -632,7 +629,8 @@ async function handleLoad() {
     // Fetch DSOUL list and have user pick one (or none) before verifying
     const dsoulResult = await window.electronAPI.fetchDsoulByCid(cid);
     const entries = dsoulResult.success && Array.isArray(dsoulResult.data) ? dsoulResult.data : [];
-    pendingDsoulEntry = await showDsoulDisambiguationModal(entries, null);
+    const chosen = await showDsoulDisambiguationModal(entries, null);
+    pendingDsoulEntry = chosen ? await ensureDsoulEntryLink(chosen) : null;
 
     await loadAndVerifyFile(cid);
     // On success, keep the panel open for review - don't clear input yet
@@ -1159,7 +1157,7 @@ async function showFilePreview(cid) {
   if (fullJsonPre) fullJsonPre.classList.add('hidden');
   if (viewFullJsonBtn) viewFullJsonBtn.textContent = 'View full JSON';
 
-  renderPreviewHeaderAndMetadata(file, cid);
+  await renderPreviewHeaderAndMetadata(file, cid);
 
   // Show/hide previous/next version buttons based on dsoulEntry
   const downloadPrevBtn = document.getElementById('download-prev-btn');
@@ -1223,7 +1221,7 @@ async function showFilePreview(cid) {
 /**
  * Render preview header (title + tags) and skill metadata (including DSOUL download, license, author).
  */
-function renderPreviewHeaderAndMetadata(file, cid) {
+async function renderPreviewHeaderAndMetadata(file, cid) {
   const title = file.skillMetadata?.name
     ? `${file.skillMetadata.name} (CID: ${cid})`
     : `CID: ${cid}`;
@@ -1283,6 +1281,17 @@ function renderPreviewHeaderAndMetadata(file, cid) {
 
   if (file.dsoulEntry) {
     const e = file.dsoulEntry;
+    const providerPageUrl = e.wordpress_url || e.link || (await window.electronAPI.getSettings()).dsoulProviderUrl?.trim() || 'https://dsoul.org';
+    if (providerPageUrl) {
+      try {
+        const providerHost = new URL(providerPageUrl).hostname || 'provider';
+        metadataHtml += `<div class="metadata-item"><strong>Provider:</strong> <a href="${escapeHtml(providerPageUrl)}" target="_blank" rel="noopener noreferrer" class="dsoul-provider-link">View skill on ${escapeHtml(providerHost)}</a></div>`;
+        hasAny = true;
+      } catch (_) {
+        metadataHtml += `<div class="metadata-item"><strong>Provider:</strong> <a href="${escapeHtml(providerPageUrl)}" target="_blank" rel="noopener noreferrer" class="dsoul-provider-link">View on DSOUL provider</a></div>`;
+        hasAny = true;
+      }
+    }
     if (e.author_name || e.author_url) {
       const authorLink = e.author_url
         ? `<a href="${escapeHtml(e.author_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.author_name || '')}</a>`
@@ -1329,14 +1338,15 @@ async function ensureDsoulEntry(cid, file) {
     dsoulApiResponseByCid.set(cid, result);
     const entries = result.success && Array.isArray(result.data) ? result.data : [];
     if (entries.length === 0) return;
-    const chosen = await showDsoulDisambiguationModal(entries, null);
+    let chosen = await showDsoulDisambiguationModal(entries, null);
     if (chosen) {
+      chosen = await ensureDsoulEntryLink(chosen);
       file.dsoulEntry = chosen;
       await window.electronAPI.saveFile(file);
       if (currentFile && currentFile.cid === cid) {
         currentFile.dsoulEntry = chosen;
       }
-      renderPreviewHeaderAndMetadata(currentFile && currentFile.cid === cid ? currentFile : file, cid);
+      await renderPreviewHeaderAndMetadata(currentFile && currentFile.cid === cid ? currentFile : file, cid);
     }
   } catch (err) {
     console.warn('DSOUL fetch failed:', err);
@@ -1348,6 +1358,18 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = String(text);
   return div.innerHTML;
+}
+
+/**
+ * Ensure the chosen DSOUL entry has a link for the provider page. Prefer wordpress_url from API, then link, else provider base URL.
+ */
+async function ensureDsoulEntryLink(entry) {
+  if (!entry) return entry;
+  const link = entry.wordpress_url || entry.link;
+  if (link) return entry;
+  const settings = await window.electronAPI.getSettings();
+  const base = (settings.dsoulProviderUrl || '').trim().replace(/\/+$/, '') || 'https://dsoul.org';
+  return { ...entry, link: base };
 }
 
 /**
@@ -1429,9 +1451,10 @@ async function updateCidDisplay(cid) {
       </div>
     `;
   } catch (error) {
+    const msg = (error && (error.message || String(error))) || 'Unknown error';
     cidDisplay.innerHTML = `
       <div class="cid-display-label">Error calculating CID:</div>
-      <div class="cid-display-value" style="color: #f48771">${error.message}</div>
+      <div class="cid-display-value" style="color: #f48771">${escapeHtml(msg)}</div>
     `;
   }
 }
@@ -1462,7 +1485,8 @@ async function handleReverify() {
     // Fetch DSOUL list again and let user pick (pre-select current choice)
     const dsoulResult = await window.electronAPI.fetchDsoulByCid(cid);
     const entries = dsoulResult.success && Array.isArray(dsoulResult.data) ? dsoulResult.data : [];
-    pendingDsoulEntry = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
+    let chosen = await showDsoulDisambiguationModal(entries, currentFile.dsoulEntry || null);
+    pendingDsoulEntry = chosen ? await ensureDsoulEntryLink(chosen) : null;
 
     await loadAndVerifyFile(cid);
     // On success, keep panel open for review

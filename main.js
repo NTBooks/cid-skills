@@ -568,18 +568,27 @@ ipcMain.handle('update-file-tags', async (event, cid, tags) => {
 
 ipcMain.handle('calculate-hash', async (event, content) => {
   try {
-    // IPFS CID is hash of raw bytes. For binary (e.g. zip) we must hash Buffer/Uint8Array, not UTF-8 decoded string.
-    let input = content;
-    if (content && typeof content.buffer === 'object' && content.buffer instanceof ArrayBuffer) {
+    if (content == null) {
+      return { success: false, error: 'No content to hash' };
+    }
+    let input;
+    if (typeof content === 'string') {
+      input = Buffer.from(content, 'utf-8');
+    } else if (content && typeof content.buffer === 'object' && content.buffer instanceof ArrayBuffer) {
       input = Buffer.from(content);
     } else if (content && content instanceof ArrayBuffer) {
       input = Buffer.from(content);
+    } else if (Buffer.isBuffer(content)) {
+      input = content;
+    } else {
+      return { success: false, error: 'Content must be a string or buffer' };
     }
     const hash = await Hash.of(input);
     return { success: true, hash };
   } catch (error) {
     console.error('Error calculating hash:', error);
-    return { success: false, error: error.message };
+    const msg = (error && (error.message || String(error))) || 'Unknown error';
+    return { success: false, error: msg };
   }
 });
 
