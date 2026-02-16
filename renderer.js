@@ -179,7 +179,7 @@ function fixCLVerifyImages(container) {
   const icons = scope.querySelectorAll('.clv-icon, .clv-inline-icon');
   icons.forEach(img => {
     if (img.src && img.src.includes('CL-Glyph-Icon.png')) {
-      img.src = 'do_not_modify/CL-Glyph-Icon.png';
+      img.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Glyph-Icon.png';
     }
   });
   
@@ -187,7 +187,7 @@ function fixCLVerifyImages(container) {
   const logos = scope.querySelectorAll('.clv-logo');
   logos.forEach(img => {
     if (img.src && img.src.includes('CL-Logo-White-Semitransparent-500.png')) {
-      img.src = 'do_not_modify/CL-Logo-White-Semitransparent-500.png';
+      img.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Logo-White-Semitransparent-500.png';
     }
   });
   
@@ -198,9 +198,9 @@ function fixCLVerifyImages(container) {
         if (node.nodeType === 1) { // Element node
           if (node.tagName === 'IMG') {
             if (node.src && node.src.includes('CL-Glyph-Icon.png')) {
-              node.src = 'do_not_modify/CL-Glyph-Icon.png';
+              node.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Glyph-Icon.png';
             } else if (node.src && node.src.includes('CL-Logo-White-Semitransparent-500.png')) {
-              node.src = 'do_not_modify/CL-Logo-White-Semitransparent-500.png';
+              node.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Logo-White-Semitransparent-500.png';
             }
           }
           // Check child images
@@ -208,9 +208,9 @@ function fixCLVerifyImages(container) {
           if (childIcons) {
             childIcons.forEach(img => {
               if (img.src && img.src.includes('CL-Glyph-Icon.png')) {
-                img.src = 'do_not_modify/CL-Glyph-Icon.png';
+                img.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Glyph-Icon.png';
               } else if (img.src && img.src.includes('CL-Logo-White-Semitransparent-500.png')) {
-                img.src = 'do_not_modify/CL-Logo-White-Semitransparent-500.png';
+                img.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Logo-White-Semitransparent-500.png';
               }
             });
           }
@@ -239,9 +239,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           // Fix images directly added
           if (node.tagName === 'IMG') {
             if (node.src && node.src.includes('CL-Glyph-Icon.png')) {
-              node.src = 'do_not_modify/CL-Glyph-Icon.png';
+              node.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Glyph-Icon.png';
             } else if (node.src && node.src.includes('CL-Logo-White-Semitransparent-500.png')) {
-              node.src = 'do_not_modify/CL-Logo-White-Semitransparent-500.png';
+              node.src = 'Skills/clverify-2025-02-09-1/clverify/CL-Logo-White-Semitransparent-500.png';
             }
           }
           // Fix images in CLVerify elements (including inline links)
