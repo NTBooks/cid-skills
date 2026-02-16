@@ -135,6 +135,21 @@ function inferMetadataFromMarkdown(content) {
 let currentFile = null;
 let fileContextMenuCid = null;
 let currentSettings = null;
+
+function normalizePathForCompare(p) {
+  return (p || '').replace(/\\/g, '/').trim().toLowerCase();
+}
+
+function isLocalInstall(file) {
+  if (!file || !file.activatedSkillsFolder) return false;
+  const configured = (currentSettings && currentSettings.skillsFolder) || '';
+  if (!configured) return true;
+  return normalizePathForCompare(file.activatedSkillsFolder) !== normalizePathForCompare(configured);
+}
+
+function isPathTag(tag) {
+  return typeof tag === 'string' && (tag.includes('/') || tag.includes('\\'));
+}
 let currentLoadCid = null;
 let isLoading = false;
 /** Map of local file CID -> next_cid from API when scan finds an update */
@@ -860,6 +875,7 @@ async function loadAndVerifyFile(cid) {
 }
 
 async function loadFileTree() {
+  if (!currentSettings) await loadSettings();
   const files = await window.electronAPI.getFiles();
   const fileTree = document.getElementById('file-tree');
   fileTree.innerHTML = '';
@@ -889,32 +905,35 @@ async function loadFileTree() {
     }
   }
 
-  // Group files by tags
+  // Group files by tags (including install path as virtual tag for local installs)
   const tagGroups = {};
   const untaggedFiles = [];
 
   files.forEach(file => {
-    if (file.tags && file.tags.length > 0) {
-      file.tags.forEach(tag => {
-        if (!tagGroups[tag]) {
-          tagGroups[tag] = [];
-        }
-        tagGroups[tag].push(file);
-      });
-    } else {
+    const tags = [...(file.tags || [])];
+    if (isLocalInstall(file) && file.activatedSkillsFolder) {
+      tags.push(file.activatedSkillsFolder);
+    }
+    if (tags.length === 0) {
       untaggedFiles.push(file);
+    } else {
+      tags.forEach(tag => {
+        if (!tagGroups[tag]) tagGroups[tag] = [];
+        if (!tagGroups[tag].includes(file)) tagGroups[tag].push(file);
+      });
     }
   });
 
   // Render tag groups
   Object.keys(tagGroups).sort().forEach(tag => {
     const tagGroup = document.createElement('div');
-    tagGroup.className = 'tag-group';
+    tagGroup.className = 'tag-group' + (isPathTag(tag) ? ' tag-group-location' : '');
 
     const tagHeader = document.createElement('div');
     tagHeader.className = 'tag-header';
     tagHeader.dataset.tag = tag;
-    tagHeader.textContent = tag;
+    tagHeader.textContent = isPathTag(tag) ? 'Location: ' + tag : tag;
+    tagHeader.title = isPathTag(tag) ? tag : tag;
     tagHeader.addEventListener('click', () => {
       tagHeader.classList.toggle('collapsed');
       tagFiles.classList.toggle('collapsed');
@@ -936,6 +955,7 @@ async function loadFileTree() {
     tagHeader.addEventListener('drop', async (e) => {
       e.preventDefault();
       tagHeader.classList.remove('drag-over');
+      if (isPathTag(tag)) return;
       const cid = e.dataTransfer.getData('text/plain');
       if (!cid) return;
       const file = await window.electronAPI.readFile(cid);
@@ -970,6 +990,7 @@ async function loadFileTree() {
     tagFiles.addEventListener('drop', async (e) => {
       e.preventDefault();
       tagHeader.classList.remove('drag-over');
+      if (isPathTag(tag)) return;
       const cid = e.dataTransfer.getData('text/plain');
       if (!cid) return;
       const file = await window.electronAPI.readFile(cid);
@@ -1014,6 +1035,9 @@ function createFileItem(file) {
   if (file.active) {
     fileItem.classList.add('active');
   }
+  const localInstall = isLocalInstall(file);
+  if (localInstall) fileItem.classList.add('file-item-local');
+  else if (file.activatedSkillsFolder) fileItem.classList.add('file-item-global');
   fileItem.draggable = true;
 
   // Use skill name if available, otherwise use CID
@@ -1031,6 +1055,12 @@ function createFileItem(file) {
   labelSpan.title = displayTitle;
   labelSpan.dataset.cid = file.cid;
   fileItem.appendChild(labelSpan);
+
+  const installBadge = document.createElement('span');
+  installBadge.className = 'file-item-install-badge' + (localInstall ? ' file-item-install-local' : ' file-item-install-global');
+  installBadge.textContent = localInstall ? 'Local' : (file.activatedSkillsFolder ? 'Global' : '');
+  installBadge.title = localInstall && file.activatedSkillsFolder ? file.activatedSkillsFolder : (file.activatedSkillsFolder ? 'Installed to configured skills folder' : '');
+  if (installBadge.textContent) fileItem.appendChild(installBadge);
 
   if (hasUpdate && nextCid) {
     const updateBtn = document.createElement('button');
@@ -1201,8 +1231,17 @@ function renderPreviewHeaderAndMetadata(file, cid) {
 
   const tagsEl = document.getElementById('preview-tags');
   const tags = file.tags && file.tags.length ? file.tags : [];
+  const localInstall = isLocalInstall(file);
+  const installPath = file.activatedSkillsFolder;
+  const parts = [];
+  if (localInstall && installPath) {
+    parts.push(`<span class="preview-tag preview-tag-location" title="${escapeHtml(installPath)}">Location: ${escapeHtml(installPath)}</span>`);
+  }
   if (tags.length > 0) {
-    tagsEl.innerHTML = tags.map((t) => `<span class="preview-tag">${escapeHtml(t)}</span>`).join('');
+    parts.push(tags.map((t) => `<span class="preview-tag">${escapeHtml(t)}</span>`).join(''));
+  }
+  if (parts.length > 0) {
+    tagsEl.innerHTML = parts.join('');
     tagsEl.classList.remove('hidden');
   } else {
     tagsEl.innerHTML = '';
@@ -1212,6 +1251,12 @@ function renderPreviewHeaderAndMetadata(file, cid) {
   const skillMetadataDiv = document.getElementById('skill-metadata');
   let hasAny = false;
   let metadataHtml = '<div class="skill-metadata-content"><h4>Skill Information</h4>';
+
+  if (file.activatedSkillsFolder) {
+    const installType = isLocalInstall(file) ? 'Local' : 'Global';
+    metadataHtml += `<div class="metadata-item"><strong>Install:</strong> ${escapeHtml(installType)}${localInstall ? ` – <span class="metadata-install-path" title="${escapeHtml(installPath)}">${escapeHtml(installPath)}</span>` : ''}</div>`;
+    hasAny = true;
+  }
 
   if (file.skillMetadata) {
     if (file.skillMetadata.name) {
