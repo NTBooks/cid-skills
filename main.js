@@ -898,6 +898,21 @@ ipcMain.handle('get-bundle-skill-content', async (event, cid) => {
   }
 });
 
+/** Validate zip buffer: has Skill.MD (case-insensitive basename). Used when DSOUL has no entry so we detect skill bundles from IPFS directly. */
+ipcMain.handle('validate-zip-skill-bundle', async (event, buffer) => {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  const tmpPath = path.join(os.tmpdir(), `dsoul-verify-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+  try {
+    await fs.writeFile(tmpPath, buf);
+    const skillContent = await readEntryFromZip(tmpPath, 'Skill.MD');
+    return { success: true, valid: !!skillContent, skillContent: skillContent || null };
+  } catch (error) {
+    return { success: false, error: error.message };
+  } finally {
+    await fs.unlink(tmpPath).catch(() => {});
+  }
+});
+
 /** License filenames to try (case-insensitive match against zip entry basename). */
 const LICENSE_ENTRY_NAMES = ['license.md', 'license', 'license.txt'];
 

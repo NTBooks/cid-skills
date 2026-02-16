@@ -9,6 +9,20 @@ const IPFS_GATEWAYS = [
 // Maximum file size for skills files (2MB) - reasonable limit for text files
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB in bytes
 
+/** True if content looks like binary (e.g. image) rather than text. Used to avoid treating binary as a skill. */
+function isLikelyBinaryContent(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength === 0) return false;
+  const bytes = new Uint8Array(arrayBuffer);
+  const len = Math.min(bytes.length, 8192);
+  for (let i = 0; i < len; i++) {
+    if (bytes[i] === 0) return true;
+  }
+  const decoded = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+  const replacementCount = (decoded.match(/\uFFFD/g) || []).length;
+  if (replacementCount > decoded.length * 0.05) return true;
+  return false;
+}
+
 // Parse YAML frontmatter from skill file, or infer from markdown
 function parseSkillHeader(content) {
   if (typeof content !== 'string') return null;
@@ -284,8 +298,10 @@ function setupEventListeners() {
 
   deleteFileBtn.addEventListener('click', handleDeleteFile);
   addTagBtn.addEventListener('click', () => {
+    contextMenu.classList.add('hidden');
     tagModal.classList.remove('hidden');
-    tagInput.focus();
+    tagInput.value = '';
+    setTimeout(() => tagInput.focus(), 0);
   });
 
   tagSubmit.addEventListener('click', handleAddTag);
@@ -730,12 +746,28 @@ async function loadAndVerifyFile(cid) {
   const verificationDiv = document.getElementById('verification-status');
   verificationDiv.innerHTML = '<h4>Verification Steps</h4>';
 
-  const isBundle = !!(pendingDsoulEntry?.is_skill_bundle ?? pendingDsoulEntry?.is_bundle);
+  const firstContent = successfulDownloads[0].content;
+  const isBundleFromDsoul = !!(pendingDsoulEntry?.is_skill_bundle ?? pendingDsoulEntry?.is_bundle);
+  const isZip = firstContent.byteLength >= 2 &&
+    new Uint8Array(firstContent)[0] === 0x50 &&
+    new Uint8Array(firstContent)[1] === 0x4B;
+
+  let isBundle = isBundleFromDsoul;
+  let validatedBundleSkillContent = null;
+  if (isZip && !isBundleFromDsoul) {
+    const validateResult = await window.electronAPI.validateZipSkillBundle(firstContent);
+    if (!validateResult.success) {
+      throw new Error(validateResult.error || 'Could not validate zip');
+    }
+    if (!validateResult.valid) {
+      throw new Error('Zip file does not contain Skill.MD (not a skill bundle)');
+    }
+    isBundle = true;
+    validatedBundleSkillContent = validateResult.skillContent || null;
+  }
 
   // Step 1: Compare gateway downloads (binary comparison for arrayBuffers)
-  const firstContent = successfulDownloads[0].content;
   let allMatch = true;
-  
   for (let i = 1; i < successfulDownloads.length; i++) {
     const a = firstContent;
     const b = successfulDownloads[i].content;
@@ -762,11 +794,22 @@ async function loadAndVerifyFile(cid) {
   // Step 2: Validate skill header (or bundle)
   const skillHeaderStep = document.createElement('div');
   skillHeaderStep.className = 'verification-step';
-  const skillMetadata = isBundle ? null : parseSkillHeader(new TextDecoder().decode(firstContent));
+  let skillMetadata = null;
+  if (isBundle) {
+    skillMetadata = validatedBundleSkillContent ? parseSkillHeader(validatedBundleSkillContent) : null;
+  } else {
+    if (isLikelyBinaryContent(firstContent)) {
+      throw new Error('Binary file (e.g. image) – not a text skill. Use a .MD skill file or a zip bundle with Skill.MD.');
+    }
+    skillMetadata = parseSkillHeader(new TextDecoder().decode(firstContent));
+  }
+  const bundleLabel = isBundleFromDsoul
+    ? 'Bundle (zip) – no skill header check'
+    : (validatedBundleSkillContent ? 'Valid skill bundle (Skill.MD found) – from IPFS directly' : 'Bundle (zip)');
   skillHeaderStep.innerHTML = `
     <input type="checkbox" ${(isBundle || skillMetadata) ? 'checked' : ''} disabled>
     <div class="verification-step-label">
-      ${isBundle ? 'Bundle (zip) – no skill header check' : (skillMetadata ? 'Valid skill header found' : 'No skill header found (file may not be a skill)')}
+      ${isBundle ? bundleLabel : (skillMetadata ? 'Valid skill header found' : 'No skill header found (file may not be a skill)')}
     </div>
   `;
   verificationDiv.appendChild(skillHeaderStep);
@@ -805,9 +848,8 @@ async function loadAndVerifyFile(cid) {
     verifiedFileContent = firstContent;
     verifiedFileIsBundle = isBundle;
 
-    // Parse skill header if present for display (bundles have no single text content)
-    const skillMetadata = isBundle ? null : parseSkillHeader(new TextDecoder().decode(firstContent));
-    
+    // skillMetadata already set in step 2 (includes bundle Skill.MD when validated from zip)
+
     // Show install section
     const installSection = document.getElementById('install-section');
     installSection.classList.remove('hidden');

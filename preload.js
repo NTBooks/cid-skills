@@ -16,5 +16,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   activateFile: (cid) => ipcRenderer.invoke('activate-file', cid),
   deactivateFile: (cid) => ipcRenderer.invoke('deactivate-file', cid),
   openSkillsFolder: () => ipcRenderer.invoke('open-skills-folder'),
-  fetchDsoulByCid: (cid) => ipcRenderer.invoke('fetch-dsoul-by-cid', cid)
+  fetchDsoulByCid: (cid) => ipcRenderer.invoke('fetch-dsoul-by-cid', cid),
+  validateZipSkillBundle: (buffer) => ipcRenderer.invoke('validate-zip-skill-bundle', buffer)
 });
