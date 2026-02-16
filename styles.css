@@ -833,6 +833,44 @@ body {
   margin-bottom: 8px;
 }
 
+/* DSOUL provider: editable dark-mode text box */
+.dsoul-provider-input,
+#dsoul-provider-input {
+  width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 4px;
+  background-color: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  color: #d4d4d4;
+  font-size: 14px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dsoul-provider-input::placeholder,
+#dsoul-provider-input::placeholder {
+  color: #6e6e6e;
+}
+
+.dsoul-provider-input:hover,
+#dsoul-provider-input:hover {
+  border-color: #505050;
+}
+
+.dsoul-provider-input:focus,
+#dsoul-provider-input:focus {
+  outline: none;
+  border-color: #007acc;
+  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.25);
+}
+
+.dsoul-provider-input:disabled,
+#dsoul-provider-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 #skills-folder-input {
   flex: 1;
   padding: 8px 12px;

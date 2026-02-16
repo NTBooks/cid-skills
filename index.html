@@ -130,6 +130,11 @@
     <div class="modal-content">
       <h3>Options</h3>
       <div class="options-section">
+        <label for="dsoul-provider-input">DSOUL API host:</label>
+        <input type="text" id="dsoul-provider-input" class="dsoul-provider-input" placeholder="https://dsoul.org" autocomplete="url" />
+        <p class="options-help">Host only (e.g. https://dsoul.org). The path /wp-json/diamond-soul/v1 is added by the app. Leave empty to use .env or default.</p>
+      </div>
+      <div class="options-section">
         <label for="skills-folder-input">Skills Folder:</label>
         <div class="folder-input-group">
           <input type="text" id="skills-folder-input" readonly placeholder="Select skills folder" />

@@ -6,9 +6,52 @@ const os = require('os');
 const Hash = require('ipfs-only-hash');
 const yauzl = require('yauzl');
 
-const defaultDsoulUrlTemplate = 'https://dsoul.org/wp-json/diamond-soul/v1/search_by_cid?cid={CID}';
+const defaultDsoulProviderOrigin = 'https://dsoul.org';
+const DSOUL_API_PATH = '/wp-json/diamond-soul/v1';
 
-async function loadDsoulUrlTemplate() {
+// CLI: parse "install" or "config" commands. argv[2] = command, then command-specific args.
+function getCliArgs() {
+  const argv = process.argv;
+  const cmd = argv[2];
+  if (cmd === 'install') {
+    const rest = argv.slice(3);
+    const global = rest.includes('-g');
+    const target = rest.find((a) => a !== '-g' && !a.startsWith('-'));
+    if (!target || !String(target).trim()) return null;
+    return { command: 'install', target: String(target).trim(), global };
+  }
+  if (cmd === 'config') {
+    const key = argv[3];
+    const value = argv[4];
+    const validKeys = ['dsoul-provider', 'skills-folder'];
+    if (!key || !validKeys.includes(key)) return null;
+    return {
+      command: 'config',
+      key,
+      value: value != null ? String(value).trim() : undefined
+    };
+  }
+  if (cmd === 'uninstall') {
+    const target = (argv[3] || '').trim();
+    if (!target) return null;
+    return { command: 'uninstall', target };
+  }
+  return null;
+}
+
+function parseCID(input) {
+  if (typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (trimmed.startsWith('ipfs://')) {
+    return trimmed.substring(7).split('/')[0].trim() || null;
+  }
+  if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z0-9]{58,}|z[a-z0-9]+)$/i.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+async function loadDsoulProviderFromEnv() {
   const envPaths = [
     app.isPackaged ? path.join(path.dirname(process.execPath), '.env') : null,
     path.join(app.getPath('userData'), '.env'),
@@ -26,7 +69,57 @@ async function loadDsoulUrlTemplate() {
       // file missing or unreadable, try next
     }
   }
-  return defaultDsoulUrlTemplate;
+  return defaultDsoulProviderOrigin;
+}
+
+/** Get DSOUL API base URL: user origin (e.g. https://dsoul.org) + /wp-json/diamond-soul/v1. Used for CID lookup and shortname resolution. */
+async function getDsoulProviderBase() {
+  const settings = await loadSettings();
+  const url = settings.dsoulProviderUrl && String(settings.dsoulProviderUrl).trim();
+  const raw = url || await loadDsoulProviderFromEnv();
+  let origin = (raw || '').trim().replace(/\/+$/, '');
+  if (!origin) origin = defaultDsoulProviderOrigin;
+  // Append API path if user only provided host (e.g. https://dsoul.org)
+  if (origin.endsWith(DSOUL_API_PATH)) return origin;
+  return origin + DSOUL_API_PATH;
+}
+
+/** URL template for CID lookup: base + /search_by_cid?cid={CID}. */
+async function getDsoulUrlTemplate() {
+  const base = await getDsoulProviderBase();
+  return `${base}/search_by_cid?cid={CID}`;
+}
+
+/** Resolve shortname (e.g. user@project:v1) to CID via DSOUL provider. GET base/resolve_shortname?shortname={NAME}. */
+async function resolveShortname(shortname) {
+  const base = await getDsoulProviderBase();
+  const url = `${base}/resolve_shortname?shortname=${encodeURIComponent(shortname)}`;
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    if (res.status === 404) {
+      return { success: false, error: `Shortname not found: ${shortname}` };
+    }
+    if (res.status === 400) {
+      return { success: false, error: text || 'Bad request (missing shortname)' };
+    }
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}: ${text || res.statusText}` };
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      return { success: false, error: 'Invalid JSON from shortname resolution' };
+    }
+    const cid = data && data.cid;
+    if (!cid || typeof cid !== 'string') {
+      return { success: false, error: 'Response missing cid' };
+    }
+    return { success: true, cid: cid.trim(), data };
+  } catch (err) {
+    return { success: false, error: err && (err.message || String(err)) };
+  }
 }
 
 let mainWindow;
@@ -44,6 +137,210 @@ async function ensureDataDir() {
   } catch (error) {
     console.error('Error creating data directory:', error);
   }
+}
+
+// IPFS gateways and limits (used by CLI install)
+const IPFS_GATEWAYS = [
+  'https://ipfs.io/ipfs/',
+  'https://gateway.pinata.cloud/ipfs/',
+  'https://dweb.link/ipfs/',
+  'https://gateway.ipfs.io/ipfs/'
+];
+const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+
+/** Minimal skill header parse for CLI: extract name from frontmatter or first # heading. */
+function parseSkillHeaderForCli(content) {
+  if (typeof content !== 'string') return null;
+  const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (frontmatterMatch) {
+    const nameMatch = frontmatterMatch[1].match(/\bname\s*:\s*(.+?)(?:\n|$)/);
+    if (nameMatch) {
+      const v = nameMatch[1].trim().replace(/^["']|["']$/g, '');
+      if (v) return { name: v };
+    }
+  }
+  const h1Match = content.match(/^#+\s*(?:Persona|Skill|Agent|Assistant)?:?\s*(.+?)(?:\s*\([^)]+\))?\s*$/m)
+    || content.match(/^#\s+(.+)$/m);
+  if (h1Match) {
+    const name = h1Match[1].trim().replace(/\s*\([^)]+\)\s*$/, '').trim();
+    if (name) return { name };
+  }
+  return null;
+}
+
+async function runCliInstall(cid, options = {}, installRef) {
+  try {
+    const template = await getDsoulUrlTemplate();
+    const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok) {
+      console.error(`DSOUL API error: HTTP ${res.status}: ${text || res.statusText}`);
+      return false;
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      console.error('Invalid JSON from DSOUL API');
+      return false;
+    }
+    const entries = Array.isArray(data) ? data : [];
+    if (entries.length === 0) {
+      console.error(`No skill found for CID: ${cid}`);
+      return false;
+    }
+    const entry = entries.length === 1 ? entries[0] : entries.find((e) => e.cid === cid) || entries[0];
+    const isBundle = !!(entry.is_skill_bundle ?? entry.is_bundle);
+
+    let content = null;
+    for (const gateway of IPFS_GATEWAYS) {
+      try {
+        const gatewayUrl = gateway + cid;
+        const response = await fetch(gatewayUrl);
+        if (!response.ok) continue;
+        const contentLength = response.headers.get('Content-Length');
+        if (contentLength && parseInt(contentLength, 10) > MAX_FILE_SIZE) continue;
+        const arrayBuffer = await response.arrayBuffer();
+        if (arrayBuffer.byteLength > MAX_FILE_SIZE) continue;
+        content = arrayBuffer;
+        break;
+      } catch (_) {
+        // try next gateway
+      }
+    }
+    if (!content) {
+      console.error('Failed to download from all IPFS gateways');
+      return false;
+    }
+
+    const buf = Buffer.from(content);
+    const hashResult = await Hash.of(buf);
+    if (hashResult !== cid) {
+      console.error(`Hash mismatch: expected ${cid}, got ${hashResult}`);
+      return false;
+    }
+
+    const contentStr = buf.toString('utf-8');
+    const skillMetadata = isBundle ? null : parseSkillHeaderForCli(contentStr);
+    const existing = await readFileData(cid).catch(() => null);
+    const fileData = {
+      cid,
+      content: isBundle ? undefined : contentStr,
+      is_skill_bundle: isBundle || undefined,
+      tags: existing?.tags ?? [],
+      active: false,
+      skillMetadata: skillMetadata || null,
+      dsoulEntry: entry,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      activatedFolderName: existing?.activatedFolderName,
+      activatedSkillsFolder: existing?.activatedSkillsFolder
+    };
+
+    const saveResult = await saveFileData(fileData, isBundle ? buf : undefined);
+    if (!saveResult.success) {
+      console.error('Save failed:', saveResult.error);
+      return false;
+    }
+
+    const settings = await loadSettings();
+    const skillsFolder = options.skillsFolder != null
+      ? options.skillsFolder
+      : (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '');
+    if (!skillsFolder) {
+      console.error('Skills folder not set. Use -g and set it in Options, or set DSOUL_SKILLS_FOLDER.');
+      return false;
+    }
+    if (options.skillsFolder != null) {
+      await fs.mkdir(skillsFolder, { recursive: true });
+    }
+
+    const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : undefined;
+    const activateResult = await doActivateFile(cid, activateOptions);
+    if (!activateResult.success) {
+      console.error('Activate failed:', activateResult.error);
+      return false;
+    }
+
+    try {
+      await updateDsoulJson(skillsFolder, 'add', {
+        cid,
+        shortname: (installRef && installRef !== cid) ? installRef : null
+      });
+    } catch (e) {
+      // non-fatal
+    }
+
+    const name = skillMetadata?.name || entry.name || cid;
+    console.log(`Installed and activated: ${name} (${cid})`);
+    return true;
+  } catch (err) {
+    console.error('Install failed:', err.message || String(err));
+    return false;
+  }
+}
+
+async function readFileData(cid) {
+  const filename = `${cid}.json`;
+  const filepath = path.join(dataDir, filename);
+  const content = await fs.readFile(filepath, 'utf-8');
+  return JSON.parse(content);
+}
+
+async function saveFileData(fileData, zipBuffer) {
+  try {
+    const cid = fileData.cid;
+    const isBundle = fileData.is_skill_bundle || fileData.is_bundle;
+    if (isBundle && zipBuffer) {
+      const zipPath = path.join(dataDir, `${cid}.zip`);
+      const buf = Buffer.isBuffer(zipBuffer) ? zipBuffer : Buffer.from(zipBuffer);
+      await fs.writeFile(zipPath, buf);
+    }
+    const toSave = isBundle ? { ...fileData, content: undefined } : { ...fileData };
+    const filename = `${cid}.json`;
+    const filepath = path.join(dataDir, filename);
+    await fs.writeFile(filepath, JSON.stringify(toSave, null, 2), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+const DSOUL_JSON_FILENAME = 'dsoul.json';
+
+function getDsoulJsonPath(skillsFolder) {
+  return path.join(skillsFolder, DSOUL_JSON_FILENAME);
+}
+
+async function readDsoulJson(skillsFolder) {
+  const filepath = getDsoulJsonPath(skillsFolder);
+  try {
+    const content = await fs.readFile(filepath, 'utf-8');
+    const data = JSON.parse(content);
+    return Array.isArray(data.skills) ? data : { skills: [] };
+  } catch (e) {
+    return { skills: [] };
+  }
+}
+
+async function updateDsoulJson(skillsFolder, action, item) {
+  if (!skillsFolder || !String(skillsFolder).trim()) return;
+  const dir = path.resolve(skillsFolder);
+  await fs.mkdir(dir, { recursive: true });
+  const data = await readDsoulJson(skillsFolder);
+  if (action === 'add') {
+    const existing = data.skills.findIndex((s) => s.cid === item.cid);
+    const entry = { cid: item.cid, shortname: item.shortname ?? null };
+    if (existing >= 0) {
+      data.skills[existing] = entry;
+    } else {
+      data.skills.push(entry);
+    }
+  } else if (action === 'remove' && item.cid) {
+    data.skills = data.skills.filter((s) => s.cid !== item.cid);
+  }
+  const filepath = getDsoulJsonPath(skillsFolder);
+  await fs.writeFile(filepath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 function createWindow() {
@@ -78,6 +375,86 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const cliArgs = getCliArgs();
+  if (cliArgs && cliArgs.command === 'config') {
+    const settings = await loadSettings();
+    const settingKey = cliArgs.key === 'dsoul-provider' ? 'dsoulProviderUrl' : 'skillsFolder';
+    if (cliArgs.value !== undefined) {
+      settings[settingKey] = cliArgs.value;
+      const result = await saveSettings(settings);
+      if (!result.success) {
+        console.error(result.error || 'Failed to save settings');
+        process.exit(1);
+        return;
+      }
+      console.log(cliArgs.key, 'set to', cliArgs.value);
+    } else {
+      const current = settings[settingKey] || '';
+      console.log(current || '(not set)');
+    }
+    process.exit(0);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'uninstall') {
+    await ensureDataDir();
+    let cid = parseCID(cliArgs.target);
+    if (!cid) {
+      const resolved = await resolveShortname(cliArgs.target);
+      if (!resolved.success) {
+        console.error(resolved.error);
+        process.exit(1);
+        return;
+      }
+      cid = resolved.cid;
+    }
+    const existing = await readFileData(cid).catch(() => null);
+    if (!existing) {
+      console.error('Not installed:', cliArgs.target);
+      process.exit(1);
+      return;
+    }
+    const uninstallBaseFolder = existing.activatedSkillsFolder || (await loadSettings()).skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
+    try {
+      if (uninstallBaseFolder) await updateDsoulJson(uninstallBaseFolder, 'remove', { cid });
+    } catch (_) {}
+    const deactivateResult = await doDeactivateFile(cid);
+    if (!deactivateResult.success && existing.active) {
+      console.warn('Could not deactivate (removing from app anyway):', deactivateResult.error);
+    }
+    const deleteResult = await doDeleteFile(cid);
+    if (!deleteResult.success) {
+      console.error(deleteResult.error || 'Failed to remove');
+      process.exit(1);
+      return;
+    }
+    console.log('Uninstalled:', cid);
+    process.exit(0);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'install') {
+    await ensureDataDir();
+    let cid = parseCID(cliArgs.target);
+    let shortnameData = null;
+    if (!cid) {
+      const resolved = await resolveShortname(cliArgs.target);
+      if (!resolved.success) {
+        console.error(resolved.error);
+        process.exit(1);
+        return;
+      }
+      cid = resolved.cid;
+      shortnameData = resolved.data;
+    }
+    if (shortnameData != null) {
+      console.log('Shortname resolution:');
+      console.log(JSON.stringify(shortnameData, null, 2));
+    }
+    const installOptions = cliArgs.global ? undefined : { skillsFolder: path.join(process.cwd(), 'Skills') };
+    const ok = await runCliInstall(cid, installOptions, cliArgs.target);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+
   // Remove menu bar completely
   Menu.setApplicationMenu(null);
   
@@ -130,26 +507,10 @@ ipcMain.handle('get-files', async () => {
 });
 
 ipcMain.handle('save-file', async (event, fileData, zipBuffer) => {
-  try {
-    const cid = fileData.cid;
-    const isBundle = fileData.is_skill_bundle || fileData.is_bundle;
-    if (isBundle && zipBuffer) {
-      const zipPath = path.join(dataDir, `${cid}.zip`);
-      const buf = Buffer.from(zipBuffer);
-      await fs.writeFile(zipPath, buf);
-    }
-    const toSave = isBundle ? { ...fileData, content: undefined } : { ...fileData };
-    const filename = `${cid}.json`;
-    const filepath = path.join(dataDir, filename);
-    await fs.writeFile(filepath, JSON.stringify(toSave, null, 2), 'utf-8');
-    return { success: true };
-  } catch (error) {
-    console.error('Error saving file:', error);
-    return { success: false, error: error.message };
-  }
+  return await saveFileData(fileData, zipBuffer);
 });
 
-ipcMain.handle('delete-file', async (event, cid) => {
+async function doDeleteFile(cid) {
   try {
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
@@ -169,9 +530,12 @@ ipcMain.handle('delete-file', async (event, cid) => {
     }
     return { success: true };
   } catch (error) {
-    console.error('Error deleting file:', error);
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('delete-file', async (event, cid) => {
+  return await doDeleteFile(cid);
 });
 
 ipcMain.handle('read-file', async (event, cid) => {
@@ -221,7 +585,7 @@ ipcMain.handle('calculate-hash', async (event, content) => {
 
 ipcMain.handle('fetch-dsoul-by-cid', async (event, cid) => {
   try {
-    const template = await loadDsoulUrlTemplate();
+    const template = await getDsoulUrlTemplate();
     const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
     const res = await fetch(url);
     const text = await res.text();
@@ -245,10 +609,12 @@ ipcMain.handle('fetch-dsoul-by-cid', async (event, cid) => {
 async function loadSettings() {
   try {
     const content = await fs.readFile(settingsPath, 'utf-8');
-    return JSON.parse(content);
+    const settings = JSON.parse(content);
+    settings.skillsFolder = settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
+    settings.dsoulProviderUrl = settings.dsoulProviderUrl ?? '';
+    return settings;
   } catch (error) {
-    // Return default settings if file doesn't exist
-    return { skillsFolder: '' };
+    return { skillsFolder: process.env.DSOUL_SKILLS_FOLDER || '', dsoulProviderUrl: '' };
   }
 }
 
@@ -345,7 +711,7 @@ function extractEntryToFileNoOverwrite(zipfile, entry, destDir, destFileNameOver
 }
 
 // File activation handlers
-ipcMain.handle('activate-file', async (event, cid) => {
+async function doActivateFile(cid, options) {
   try {
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
@@ -353,13 +719,35 @@ ipcMain.handle('activate-file', async (event, cid) => {
     const fileData = JSON.parse(content);
 
     const settings = await loadSettings();
-    if (!settings.skillsFolder) {
-      return { success: false, error: 'Skills folder not set. Please configure it in Options.' };
+    const baseFolder = (options && options.skillsFolderOverride != null && options.skillsFolderOverride !== '')
+      ? options.skillsFolderOverride
+      : (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '');
+    if (!baseFolder) {
+      return { success: false, error: 'Skills folder not set. Please configure it in Options or set DSOUL_SKILLS_FOLDER.' };
     }
 
-    const fileSafeName = getFileSafeSkillName(fileData);
-    const { skillDir, folderName } = await getSkillDirNoConflict(settings.skillsFolder, fileSafeName);
-    await fs.mkdir(skillDir, { recursive: true });
+    const baseFolderResolved = path.resolve(baseFolder);
+    const sameFolder = fileData.activatedFolderName && fileData.activatedSkillsFolder &&
+      path.resolve(fileData.activatedSkillsFolder) === baseFolderResolved;
+
+    let skillDir;
+    let folderName;
+    if (sameFolder) {
+      folderName = fileData.activatedFolderName;
+      skillDir = path.join(baseFolder, folderName);
+      try {
+        await fs.rm(skillDir, { recursive: true, force: true });
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+      await fs.mkdir(skillDir, { recursive: true });
+    } else {
+      const fileSafeName = getFileSafeSkillName(fileData);
+      const result = await getSkillDirNoConflict(baseFolder, fileSafeName);
+      skillDir = result.skillDir;
+      folderName = result.folderName;
+      await fs.mkdir(skillDir, { recursive: true });
+    }
 
     if (fileData.is_skill_bundle || fileData.is_bundle) {
       const zipPath = path.join(dataDir, `${cid}.zip`);
@@ -393,13 +781,22 @@ ipcMain.handle('activate-file', async (event, cid) => {
 
     fileData.active = true;
     fileData.activatedFolderName = folderName;
+    fileData.activatedSkillsFolder = baseFolder;
     await fs.writeFile(filepath, JSON.stringify(fileData, null, 2), 'utf-8');
+
+    try {
+      await updateDsoulJson(baseFolder, 'add', { cid, shortname: null });
+    } catch (_) {}
 
     return { success: true };
   } catch (error) {
     console.error('Error activating file:', error);
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('activate-file', async (event, cid) => {
+  return await doActivateFile(cid);
 });
 
 ipcMain.handle('hash-file-from-path', async (event, cid) => {
@@ -510,27 +907,33 @@ ipcMain.handle('get-bundle-license-content', async (event, cid) => {
   }
 });
 
-ipcMain.handle('deactivate-file', async (event, cid) => {
+async function doDeactivateFile(cid) {
   try {
-    const settings = await loadSettings();
-    if (!settings.skillsFolder) {
-      return { success: false, error: 'Skills folder not set.' };
-    }
-
     const filename = `${cid}.json`;
     const filepath = path.join(dataDir, filename);
     const content = await fs.readFile(filepath, 'utf-8');
     const fileData = JSON.parse(content);
 
+    const settings = await loadSettings();
+    const baseFolder = fileData.activatedSkillsFolder || settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
+
+    try {
+      if (baseFolder) await updateDsoulJson(baseFolder, 'remove', { cid });
+    } catch (_) {}
+
     if (fileData.activatedFolderName) {
-      const skillDir = path.join(settings.skillsFolder, fileData.activatedFolderName);
+      if (!baseFolder) {
+        return { success: false, error: 'Skills folder not set and activation path unknown.' };
+      }
+      const skillDir = path.join(baseFolder, fileData.activatedFolderName);
       try {
         await fs.rm(skillDir, { recursive: true, force: true });
       } catch (e) {
         if (e.code !== 'ENOENT') throw e;
       }
       delete fileData.activatedFolderName;
-    } else {
+      delete fileData.activatedSkillsFolder;
+    } else if (baseFolder) {
       if (fileData.is_skill_bundle || fileData.is_bundle) {
         const zipPath = path.join(dataDir, `${cid}.zip`);
         const entries = await new Promise((resolve, reject) => {
@@ -547,7 +950,7 @@ ipcMain.handle('deactivate-file', async (event, cid) => {
         });
         for (const fileName of entries) {
           if (/\/$/.test(fileName)) continue;
-          const fullPath = path.join(settings.skillsFolder, fileName);
+          const fullPath = path.join(baseFolder, fileName);
           try {
             await fs.unlink(fullPath);
           } catch (e) {
@@ -555,7 +958,7 @@ ipcMain.handle('deactivate-file', async (event, cid) => {
           }
         }
       } else {
-        const skillsFilePath = path.join(settings.skillsFolder, `${cid}.MD`);
+        const skillsFilePath = path.join(baseFolder, `${cid}.MD`);
         try {
           await fs.unlink(skillsFilePath);
         } catch (error) {
@@ -569,7 +972,10 @@ ipcMain.handle('deactivate-file', async (event, cid) => {
 
     return { success: true };
   } catch (error) {
-    console.error('Error deactivating file:', error);
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('deactivate-file', async (event, cid) => {
+  return await doDeactivateFile(cid);
 });

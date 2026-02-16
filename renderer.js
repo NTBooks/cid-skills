@@ -292,11 +292,13 @@ function setupEventListeners() {
   const optionsCancel = document.getElementById('options-cancel');
   const browseFolderBtn = document.getElementById('browse-folder-btn');
   const skillsFolderInput = document.getElementById('skills-folder-input');
+  const dsoulProviderInput = document.getElementById('dsoul-provider-input');
   const toggleActiveBtn = document.getElementById('toggle-active');
 
   optionsBtn.addEventListener('click', async () => {
     await loadSettings();
     skillsFolderInput.value = currentSettings?.skillsFolder || '';
+    dsoulProviderInput.value = currentSettings?.dsoulProviderUrl || '';
     optionsModal.classList.remove('hidden');
   });
 
@@ -306,7 +308,8 @@ function setupEventListeners() {
 
   optionsSave.addEventListener('click', async () => {
     const settings = {
-      skillsFolder: skillsFolderInput.value
+      skillsFolder: skillsFolderInput.value,
+      dsoulProviderUrl: (dsoulProviderInput.value || '').trim()
     };
     const result = await window.electronAPI.saveSettings(settings);
     if (result.success) {
