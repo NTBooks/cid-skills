@@ -44,6 +44,10 @@ Desktop.ini
 .env.local
 .env.*.local
 
+# CLI test config (contains credentials)
+test.config
+.cli-test/
+
 # Electron specific
 app/dist/
 release/

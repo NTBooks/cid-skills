@@ -14,7 +14,8 @@
     "dist:win": "electron-builder --win && npm run cleanup:dist",
     "dist:mac": "electron-builder --mac && npm run cleanup:dist",
     "dist:linux": "electron-builder --linux && npm run cleanup:dist",
-    "cleanup:dist": "node scripts/cleanup-dist.js"
+    "cleanup:dist": "node scripts/cleanup-dist.js",
+    "test:cli": "node scripts/test-cli.js"
   },
   "keywords": [
     "ipfs",
@@ -71,6 +72,8 @@
     "electron-builder": "^26.7.0"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
+    "form-data": "^4.0.5",
     "ipfs-only-hash": "^2.0.1",
     "yauzl": "^2.10.0"
   }

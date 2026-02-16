@@ -1,13 +1,26 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const os = require('os');
+const { Writable } = require('stream');
+const readline = require('readline');
+const archiver = require('archiver');
+const FormData = require('form-data');
 const Hash = require('ipfs-only-hash');
 const yauzl = require('yauzl');
 
 const defaultDsoulProviderOrigin = 'https://dsoul.org';
 const DSOUL_API_PATH = '/wp-json/diamond-soul/v1';
+
+function printCliDisclaimer() {
+  const msg = [
+    'dsoul CLI - alpha release. Use at your own risk.',
+    'Open source: https://github.com/NTBooks/cid-skills',
+    ''
+  ].join('\n');
+  process.stderr.write(msg);
+}
 
 // CLI: parse "install" or "config" commands. argv[2] = command, then command-specific args.
 function getCliArgs() {
@@ -16,14 +29,15 @@ function getCliArgs() {
   if (cmd === 'install') {
     const rest = argv.slice(3);
     const global = rest.includes('-g');
-    const target = rest.find((a) => a !== '-g' && !a.startsWith('-'));
+    const yes = rest.includes('-y');
+    const target = rest.find((a) => a !== '-g' && a !== '-y' && !a.startsWith('-'));
     if (!target || !String(target).trim()) return null;
-    return { command: 'install', target: String(target).trim(), global };
+    return { command: 'install', target: String(target).trim(), global, yes };
   }
   if (cmd === 'config') {
     const key = argv[3];
     const value = argv[4];
-    const validKeys = ['dsoul-provider', 'skills-folder'];
+    const validKeys = ['dsoul-provider', 'skills-folder', 'skills-folder-name'];
     if (!key || !validKeys.includes(key)) return null;
     return {
       command: 'config',
@@ -35,6 +49,39 @@ function getCliArgs() {
     const target = (argv[3] || '').trim();
     if (!target) return null;
     return { command: 'uninstall', target };
+  }
+  if (cmd === 'package') {
+    const folder = (argv[3] || '').trim();
+    if (!folder) return null;
+    return { command: 'package', folder };
+  }
+  if (cmd === 'register') return { command: 'register' };
+  if (cmd === 'unregister') return { command: 'unregister' };
+  if (cmd === 'help' || cmd === '-h' || cmd === '--help') return { command: 'help' };
+  if (cmd === 'balance') return { command: 'balance' };
+  if (cmd === 'files') {
+    const rest = argv.slice(3);
+    const opts = { page: 1, per_page: 100 };
+    rest.forEach((a) => {
+      if (a.startsWith('--page=')) opts.page = parseInt(a.slice(7), 10) || 1;
+      else if (a.startsWith('--per_page=')) opts.per_page = parseInt(a.slice(11), 10) || 100;
+    });
+    return { command: 'files', ...opts };
+  }
+  if (cmd === 'freeze') {
+    const rest = argv.slice(3);
+    const nonFlags = rest.filter((a) => !a.startsWith('--'));
+    const file = nonFlags.length ? nonFlags.join(' ').trim() : '';
+    if (!file) return null;
+    const opts = { file };
+    rest.forEach((a) => {
+      if (a.startsWith('--shortname=')) opts.shortname = a.slice(12).trim();
+      else if (a.startsWith('--tags=')) opts.tags = a.slice(7).trim();
+      else if (a.startsWith('--version=')) opts.version = a.slice(10).trim();
+      else if (a.startsWith('--license_url=')) opts.license_url = a.slice(14).trim();
+      else if (a.startsWith('--ancillary_cid=')) opts.ancillary_cid = a.slice(16).trim();
+    });
+    return { command: 'freeze', ...opts };
   }
   return null;
 }
@@ -126,6 +173,7 @@ let mainWindow;
 const userDataPath = app.getPath('userData');
 const dataDir = path.join(userDataPath, 'ipfs-files');
 const settingsPath = path.join(userDataPath, 'settings.json');
+const wpCredentialsPath = path.join(userDataPath, 'wp-credentials.enc');
 
 // Set app name before accessing userData path
 app.setName('Diamond Soul Downloader');
@@ -139,6 +187,49 @@ async function ensureDataDir() {
   }
 }
 
+/** Load WordPress credentials from secure storage. Returns { username, applicationKey } or null. */
+async function loadWpCredentials() {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  try {
+    const buf = await fs.readFile(wpCredentialsPath);
+    const decrypted = safeStorage.decryptString(Buffer.from(buf));
+    const data = JSON.parse(decrypted);
+    if (data && typeof data.username === 'string' && typeof data.applicationKey === 'string') {
+      return { username: data.username.trim(), applicationKey: data.applicationKey };
+    }
+  } catch (_) {
+    // file missing, decrypt failed, or invalid JSON
+  }
+  return null;
+}
+
+/** Save WordPress credentials to secure storage. */
+async function saveWpCredentials(credentials) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { success: false, error: 'Secure storage is not available on this system' };
+  }
+  try {
+    const plain = JSON.stringify({
+      username: String(credentials.username || '').trim(),
+      applicationKey: String(credentials.applicationKey || '').trim()
+    });
+    const encrypted = safeStorage.encryptString(plain);
+    await fs.writeFile(wpCredentialsPath, Buffer.from(encrypted));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err && (err.message || String(err)) };
+  }
+}
+
+/** Clear stored WordPress credentials. */
+async function clearWpCredentials() {
+  try {
+    await fs.unlink(wpCredentialsPath);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+}
+
 // Default IPFS gateways (used when none configured)
 const DEFAULT_IPFS_GATEWAYS = [
   'https://ipfs.io/ipfs/',
@@ -147,6 +238,25 @@ const DEFAULT_IPFS_GATEWAYS = [
   'https://gateway.ipfs.io/ipfs/'
 ];
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+
+/** Get sortable timestamp from DSOUL entry for "oldest" ordering. Uses date, date_gmt, modified, post_date. */
+function getEntryDateMs(entry) {
+  const raw = entry?.date || entry?.date_gmt || entry?.modified || entry?.post_date;
+  if (raw == null || raw === '') return 0;
+  const ms = new Date(raw).getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** Ask user for input via readline. Returns Promise<string>. */
+function askLine(prompt) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer != null ? String(answer).trim() : '');
+    });
+  });
+}
 
 /** Minimal skill header parse for CLI: extract name from frontmatter or first # heading. */
 function parseSkillHeaderForCli(content) {
@@ -190,7 +300,42 @@ async function runCliInstall(cid, options = {}, installRef) {
       console.error(`No skill found for CID: ${cid}`);
       return false;
     }
-    const entry = entries.length === 1 ? entries[0] : entries.find((e) => e.cid === cid) || entries[0];
+    let entry;
+    if (entries.length === 1) {
+      entry = entries[0];
+    } else if (options.autoPickOldest) {
+      const sorted = [...entries].sort((a, b) => getEntryDateMs(a) - getEntryDateMs(b));
+      entry = sorted[0];
+      console.log(`Multiple entries for CID; using oldest (${entry.name || entry.cid || cid}).`);
+    } else {
+      const sorted = [...entries].sort((a, b) => getEntryDateMs(a) - getEntryDateMs(b));
+      console.log('\nMultiple Diamond Soul entries for this CID. Choose one:\n');
+      sorted.forEach((e, i) => {
+        const num = i + 1;
+        const name = e.name || 'Unnamed';
+        const author = e.author_name ? ` by ${e.author_name}` : '';
+        const dateRaw = e.date || e.date_gmt || e.modified || e.post_date;
+        const dateStr = dateRaw ? new Date(dateRaw).toISOString().slice(0, 10) : '';
+        const tags = Array.isArray(e.tags) && e.tags.length ? ` [${e.tags.join(', ')}]` : '';
+        const link = e.download_url || e.wordpress_url || e.link ? ' — ' + (e.download_url || e.wordpress_url || e.link) : '';
+        console.log(`  ${num}) ${name}${author}${dateStr ? ` — ${dateStr}` : ''}${tags}${link}`);
+      });
+      console.log('');
+      const isTty = process.stdin.isTTY && process.stdout.isTTY;
+      if (!isTty) {
+        entry = sorted[0];
+        console.log('Non-interactive; using oldest (1).');
+      } else {
+        const answer = await askLine('Enter number (1-' + sorted.length + '): ');
+        const idx = parseInt(answer, 10);
+        if (Number.isNaN(idx) || idx < 1 || idx > sorted.length) {
+          console.error('Invalid choice. Using oldest (1).');
+          entry = sorted[0];
+        } else {
+          entry = sorted[idx - 1];
+        }
+      }
+    }
     const isBundle = !!(entry.is_skill_bundle ?? entry.is_bundle);
 
     const settings = await loadSettings();
@@ -283,6 +428,395 @@ async function runCliInstall(cid, options = {}, installRef) {
     return true;
   } catch (err) {
     console.error('Install failed:', err.message || String(err));
+    return false;
+  }
+}
+
+const PACKAGE_REQUIRED_FILES = ['license.txt', 'skill.md'];
+
+async function runCliPackage(folderArg) {
+  try {
+    const resolved = path.resolve(process.cwd(), folderArg);
+    const stat = await fs.stat(resolved).catch((e) => null);
+    if (!stat) {
+      console.error('Package failed: folder not found:', resolved);
+      return false;
+    }
+    if (!stat.isDirectory()) {
+      console.error('Package failed: not a directory:', resolved);
+      return false;
+    }
+    const folderName = path.basename(resolved);
+    const entries = await fs.readdir(resolved, { withFileTypes: true });
+    const fileNames = entries.filter((e) => e.isFile()).map((e) => e.name);
+    const lowerToActual = {};
+    fileNames.forEach((name) => {
+      lowerToActual[name.toLowerCase()] = name;
+    });
+    const missing = [];
+    for (const required of PACKAGE_REQUIRED_FILES) {
+      if (!lowerToActual[required]) missing.push(required);
+    }
+    if (missing.length > 0) {
+      console.error('Package failed: missing required file(s):', missing.join(', '));
+      return false;
+    }
+    const zipName = folderName + '.zip';
+    const zipPath = path.join(path.dirname(resolved), zipName);
+    const output = fsSync.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    await new Promise((resolve, reject) => {
+      output.on('close', resolve);
+      archive.on('error', (err) => reject(err));
+      archive.on('warning', (err) => {
+        if (err.code !== 'ENOENT') reject(err);
+      });
+      archive.pipe(output);
+      archive.directory(resolved, false);
+      archive.finalize();
+    });
+    console.log('Created:', zipPath);
+    return true;
+  } catch (err) {
+    console.error('Package failed:', err.message || String(err));
+    return false;
+  }
+}
+
+function getCliHelpText() {
+  return [
+    'Diamond Soul Downloader - dsoul CLI',
+    '',
+    'Usage: dsoul <command> [options] [args]',
+    '',
+    'Commands:',
+    '  config [<key> [value]]     Set or view dsoul-provider, skills-folder, skills-folder-name',
+    '  install [-g] [-y] <cid-or-shortname>   Install a skill by CID or shortname',
+    '  uninstall <cid-or-shortname>           Uninstall a skill (CID or shortname)',
+    '  package <folder>          Package a folder (license.txt + skill.md) as zip',
+    '  freeze <file> [opts]      Stamp a file (zip/js/css/md/txt) via DSOUL freeze API',
+    '  balance                   Check stamp/credit balance (uses stored credentials)',
+    '  files [opts]              List your frozen files (uses stored credentials)',
+    '  register                  Store WordPress username and application key (secure)',
+    '  unregister                Clear stored WordPress credentials',
+    '  help                      Show this help',
+    '',
+    'Options for install:',
+    '  -g    Install to configured global skills folder',
+    '  -y    Auto-pick oldest entry when multiple DSOUL entries exist',
+    '',
+    'Options for freeze:',
+    '  --shortname=NAME   Register shortname (username@NAME:version); fails if taken',
+    '  --tags=tag1,tag2   Comma-separated tags (or hashtags)',
+    '  --version=X.Y.Z   Version (default: 1.0.0)',
+    '  --license_url=URL   URL to a license file',
+    '  --ancillary_cid=CID CID or URL for additional resources',
+    '',
+    'Options for files:',
+    '  --page=N       Page number (default: 1)',
+    '  --per_page=N   Items per page (default: 100, max: 500)',
+    ''
+  ].join('\n');
+}
+
+async function runCliRegister() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      console.error('Register failed: secure storage is not available on this system.');
+      return false;
+    }
+    let username = (process.env.DSOUL_USER || '').trim();
+    let applicationKey = (process.env.DSOUL_TOKEN || process.env.DSOUL_APPLICATION_KEY || '').trim();
+    if (!username || !applicationKey) {
+      if (!process.stdin.isTTY) {
+        console.error('Register failed: no interactive terminal (Electron may not have stdin).');
+        console.error('Set DSOUL_USER and DSOUL_TOKEN (or DSOUL_APPLICATION_KEY) and run again.');
+        return false;
+      }
+      username = await askLine('WordPress username: ');
+      if (!username) {
+        console.error('Register failed: username is required.');
+        return false;
+      }
+      applicationKey = await askLine('Application key: ');
+      if (!applicationKey) {
+        console.error('Register failed: application key is required.');
+        return false;
+      }
+    }
+    const result = await saveWpCredentials({ username, applicationKey });
+    if (!result.success) {
+      console.error('Register failed:', result.error);
+      return false;
+    }
+    console.log('Credentials saved securely.');
+    return true;
+  } catch (err) {
+    console.error('Register failed:', err.message || String(err));
+    return false;
+  }
+}
+
+async function runCliUnregister() {
+  try {
+    await clearWpCredentials();
+    console.log('Credentials cleared.');
+    return true;
+  } catch (err) {
+    console.error('Unregister failed:', err.message || String(err));
+    return false;
+  }
+}
+
+async function runCliBalance() {
+  try {
+    const credentials = await loadWpCredentials();
+    if (!credentials) {
+      console.error('Balance failed: no stored credentials. Run dsoul register first.');
+      return false;
+    }
+    const base = await getDsoulProviderBase();
+    const balanceUrl = base + '/balance';
+    const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
+    const res = await fetch(balanceUrl, {
+      method: 'GET',
+      headers: { Authorization: authHeader }
+    });
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      console.error('Balance failed: invalid JSON response');
+      return false;
+    }
+    if (!res.ok) {
+      const msg = (data && data.message) || text || res.statusText;
+      console.error('Balance failed:', res.status, msg);
+      if (text && text.trim()) console.error('Server response:', text.trim());
+      return false;
+    }
+    if (data && data.success) {
+      const stamps = data.stamps != null ? data.stamps : (data.full_data && data.full_data.PMCREDIT);
+      console.log('Stamps:', stamps);
+      if (data.full_data) {
+        console.log('Full data:', JSON.stringify(data.full_data, null, 2));
+      }
+      return true;
+    }
+    console.error('Balance failed: unexpected response', data);
+    return false;
+  } catch (err) {
+    console.error('Balance failed:', err.message || String(err));
+    return false;
+  }
+}
+
+async function runCliFiles(opts) {
+  try {
+    const credentials = await loadWpCredentials();
+    if (!credentials) {
+      console.error('Files failed: no stored credentials. Run dsoul register first.');
+      return false;
+    }
+    const base = await getDsoulProviderBase();
+    const page = Math.max(1, parseInt(opts.page, 10) || 1);
+    const perPage = Math.max(1, Math.min(500, parseInt(opts.per_page, 10) || 100));
+    const filesUrl = `${base}/files?page=${encodeURIComponent(page)}&per_page=${encodeURIComponent(perPage)}`;
+    const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
+    const res = await fetch(filesUrl, {
+      method: 'GET',
+      headers: { Authorization: authHeader }
+    });
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      console.error('Files failed: invalid JSON response');
+      return false;
+    }
+    if (!res.ok) {
+      const msg = (data && data.message) || text || res.statusText;
+      console.error('Files failed:', res.status, msg);
+      if (text && text.trim()) console.error('Server response:', text.trim());
+      return false;
+    }
+    if (!data || !data.success) {
+      console.error('Files failed: unexpected response', data);
+      return false;
+    }
+    const files = Array.isArray(data.files) ? data.files : [];
+    const total = data.total != null ? data.total : files.length;
+    const pages = data.pages != null ? data.pages : 1;
+    console.log(`Page ${page} of ${pages} (${data.count ?? files.length} shown, ${total} total)\n`);
+    if (files.length === 0) {
+      console.log('No files.');
+      return true;
+    }
+    files.forEach((f) => {
+      const title = f.title || f.cid || '(no title)';
+      const cid = f.cid || '-';
+      const date = f.date ? f.date.replace(/T.*/, '') : '-';
+      const shortnames = Array.isArray(f.shortnames) && f.shortnames.length ? f.shortnames.join(', ') : '-';
+      const tags = Array.isArray(f.tags) && f.tags.length ? f.tags.join(', ') : '-';
+      const bundle = f.is_skill_bundle ? ' [bundle]' : '';
+      console.log(`${title}${bundle}`);
+      console.log(`  CID: ${cid}`);
+      console.log(`  Date: ${date}  Shortnames: ${shortnames}`);
+      console.log(`  Tags: ${tags}`);
+      if (f.url) console.log(`  URL: ${f.url}`);
+      console.log('');
+    });
+    return true;
+  } catch (err) {
+    console.error('Files failed:', err.message || String(err));
+    return false;
+  }
+}
+
+/** Extensions sent as cl_file (multipart). .md sent as content+filename (urlencoded) so body reaches server on Windows/Electron. */
+const FREEZE_FILE_UPLOAD_EXTS = ['.zip', '.js', '.css'];
+
+/**
+ * Returns true if the zip has a single folder at root (e.g. pkg-xxx/license.txt) instead of
+ * files at root (license.txt, skill.md). Skill bundles must have license.txt and skill.md at root.
+ */
+function isZipMisconfigured(zipPath) {
+  return new Promise((resolve) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) {
+        resolve(false);
+        return;
+      }
+      const names = [];
+      zipfile.on('entry', (entry) => {
+        names.push(entry.fileName.replace(/\\/g, '/'));
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => {
+        zipfile.close();
+        const topLevel = new Set();
+        for (const n of names) {
+          const idx = n.indexOf('/');
+          if (idx === -1) topLevel.add(n);
+          else topLevel.add(n.slice(0, idx));
+        }
+        const roots = [...topLevel];
+        const singleRootDir = roots.length === 1 && names.some((n) => n.includes('/'));
+        const allUnderOneDir = singleRootDir && names.every((n) => n.startsWith(roots[0] + '/') || n === roots[0] + '/');
+        resolve(!!(singleRootDir && allUnderOneDir));
+      });
+      zipfile.readEntry();
+    });
+  });
+}
+
+async function runCliFreeze(opts) {
+  try {
+    const credentials = await loadWpCredentials();
+    if (!credentials) {
+      console.error('Freeze failed: no stored credentials. Run dsoul register first.');
+      return false;
+    }
+    const filePath = path.resolve(process.cwd(), opts.file);
+    const stat = await fs.stat(filePath).catch((e) => null);
+    if (!stat || !stat.isFile()) {
+      console.error('Freeze failed: file not found or not a file:', filePath);
+      return false;
+    }
+    const filename = path.basename(filePath);
+    const ext = path.extname(filename).toLowerCase();
+    if (ext === '.zip') {
+      const misconfigured = await isZipMisconfigured(filePath);
+      if (misconfigured) {
+        console.error('Freeze failed: zip has a folder at root. skill.md and license.txt must be at the root of the zip.');
+        console.error('Repackage with: dsoul package <folder>   (this puts the folder contents at the zip root).');
+        return false;
+      }
+    }
+    const base = await getDsoulProviderBase();
+    const freezeUrl = base + '/freeze';
+    const isFileUpload = FREEZE_FILE_UPLOAD_EXTS.includes(ext);
+    const version = (opts.version && String(opts.version).trim()) || '1.0.0';
+    const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
+
+    let res;
+    if (isFileUpload) {
+      const fileBuffer = await fs.readFile(filePath);
+      const form = new FormData();
+      form.append('cl_file', fileBuffer, { filename });
+      form.append('filename', filename);
+      form.append('version', version);
+      if (opts.tags) form.append('tags', opts.tags);
+      if (opts.shortname) form.append('shortname', opts.shortname.trim());
+      if (opts.license_url) form.append('license_url', opts.license_url.trim());
+      if (opts.ancillary_cid) form.append('ancillary_cid', opts.ancillary_cid.trim());
+      const formHeaders = form.getHeaders();
+      const bodyBuffer = await new Promise((resolve, reject) => {
+        const chunks = [];
+        const collector = new Writable({
+          write(chunk, enc, cb) {
+            chunks.push(chunk);
+            cb();
+          }
+        });
+        collector.on('finish', () => resolve(Buffer.concat(chunks)));
+        collector.on('error', reject);
+        form.on('error', reject);
+        form.pipe(collector);
+      });
+      res = await fetch(freezeUrl, {
+        method: 'POST',
+        headers: {
+          ...formHeaders,
+          Authorization: authHeader,
+          'Content-Length': String(bodyBuffer.length)
+        },
+        body: bodyBuffer
+      });
+    } else {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const params = new URLSearchParams();
+      params.append('filename', filename);
+      params.append('content', content);
+      params.append('version', version);
+      if (opts.tags) params.append('tags', opts.tags);
+      if (opts.shortname) params.append('shortname', opts.shortname.trim());
+      if (opts.license_url) params.append('license_url', opts.license_url.trim());
+      if (opts.ancillary_cid) params.append('ancillary_cid', opts.ancillary_cid.trim());
+      res = await fetch(freezeUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: authHeader
+        },
+        body: params.toString()
+      });
+    }
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      console.error('Freeze failed: invalid JSON response:', text.slice(0, 200));
+      return false;
+    }
+    if (!res.ok) {
+      const msg = (data && data.message) || data?.data?.message || text || res.statusText;
+      console.error('Freeze failed:', res.status, msg);
+      if (text && text.trim()) console.error('Server response:', text.trim());
+      return false;
+    }
+    if (data && data.success && data.data) {
+      console.log('CID:', data.data.cid);
+      if (data.data.guid) console.log('URL:', data.data.guid);
+      return true;
+    }
+    console.error('Freeze failed: unexpected response', data);
+    return false;
+  } catch (err) {
+    console.error('Freeze failed:', err.message || String(err));
     return false;
   }
 }
@@ -383,9 +917,38 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   const cliArgs = getCliArgs();
+  if (cliArgs) {
+    printCliDisclaimer();
+    if (cliArgs.command === 'help') {
+      console.log(getCliHelpText());
+      process.exit(0);
+      return;
+    }
+  }
+  if (cliArgs && cliArgs.command === 'register') {
+    const ok = await runCliRegister();
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'unregister') {
+    const ok = await runCliUnregister();
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'balance') {
+    const ok = await runCliBalance();
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'files') {
+    const ok = await runCliFiles(cliArgs);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
   if (cliArgs && cliArgs.command === 'config') {
     const settings = await loadSettings();
-    const settingKey = cliArgs.key === 'dsoul-provider' ? 'dsoulProviderUrl' : 'skillsFolder';
+    const keyToSetting = { 'dsoul-provider': 'dsoulProviderUrl', 'skills-folder': 'skillsFolder', 'skills-folder-name': 'skillsFolderName' };
+    const settingKey = keyToSetting[cliArgs.key];
     if (cliArgs.value !== undefined) {
       settings[settingKey] = cliArgs.value;
       const result = await saveSettings(settings);
@@ -456,8 +1019,20 @@ app.whenReady().then(async () => {
       console.log('Shortname resolution:');
       console.log(JSON.stringify(shortnameData, null, 2));
     }
-    const installOptions = cliArgs.global ? undefined : { skillsFolder: path.join(process.cwd(), 'Skills') };
+    const installBase = cliArgs.global ? null : (await loadSettings()).skillsFolderName || 'Skills';
+    const installOptions = cliArgs.global ? {} : { skillsFolder: path.join(process.cwd(), installBase) };
+    if (cliArgs.yes) installOptions.autoPickOldest = true;
     const ok = await runCliInstall(cid, installOptions, cliArgs.target);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'package') {
+    const ok = await runCliPackage(cliArgs.folder);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'freeze') {
+    const ok = await runCliFreeze(cliArgs);
     process.exit(ok ? 0 : 1);
     return;
   }
@@ -627,6 +1202,7 @@ async function loadSettings() {
     const content = await fs.readFile(settingsPath, 'utf-8');
     const settings = JSON.parse(content);
     settings.skillsFolder = settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
+    settings.skillsFolderName = settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '' ? String(settings.skillsFolderName).trim() : 'Skills';
     settings.dsoulProviderUrl = settings.dsoulProviderUrl ?? '';
     if (!Array.isArray(settings.ipfsGateways) || settings.ipfsGateways.length === 0) {
       settings.ipfsGateways = DEFAULT_IPFS_GATEWAYS.slice();
@@ -635,6 +1211,7 @@ async function loadSettings() {
   } catch (error) {
     return {
       skillsFolder: process.env.DSOUL_SKILLS_FOLDER || '',
+      skillsFolderName: 'Skills',
       dsoulProviderUrl: '',
       ipfsGateways: DEFAULT_IPFS_GATEWAYS.slice()
     };

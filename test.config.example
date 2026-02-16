@@ -1,0 +1,12 @@
+# CLI test credentials and options
+# Copy to test.config and fill in:  cp test.config.example test.config
+# test.config is gitignored so your credentials are not committed.
+
+# WordPress username (required for register/balance/freeze/files)
+user=
+
+# Application password from [ds_cli_access] shortcode (required)
+token=
+
+# DSOUL API host (optional; default https://dsoul.org)
+# dsoul_provider=https://dsoul.org
