@@ -58,6 +58,19 @@ function getCliArgs() {
   if (cmd === 'register') return { command: 'register' };
   if (cmd === 'unregister') return { command: 'unregister' };
   if (cmd === 'help' || cmd === '-h' || cmd === '--help') return { command: 'help' };
+  if (cmd === 'update') {
+    const rest = argv.slice(3);
+    const globalOnly = rest.includes('-g');
+    const localOnly = rest.includes('--local');
+    return { command: 'update', globalOnly, localOnly };
+  }
+  if (cmd === 'upgrade') {
+    const rest = argv.slice(3);
+    const globalOnly = rest.includes('-g');
+    const localOnly = rest.includes('--local');
+    const yes = rest.includes('-y');
+    return { command: 'upgrade', globalOnly, localOnly, yes };
+  }
   if (cmd === 'balance') return { command: 'balance' };
   if (cmd === 'files') {
     const rest = argv.slice(3);
@@ -137,7 +150,20 @@ async function getDsoulProviderBase() {
   return origin + DSOUL_API_PATH;
 }
 
-/** URL template for CID lookup: base + /search_by_cid?cid={CID}. */
+/** Get the hostname of the configured DSOUL provider (e.g. dsoul.org, donotreplace.com). */
+async function getProviderHostname() {
+  try {
+    const base = await getDsoulProviderBase();
+    const u = new URL(base);
+    return u.hostname || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** URL template for CID lookup: base + /search_by_cid?cid={CID}.
+ *  Server should return an array of entries; each entry must include the WordPress post ID
+ *  so we can store it and call GET /file/{post_id}/graph for updates. Use id, ID, or post_id (number). */
 async function getDsoulUrlTemplate() {
   const base = await getDsoulProviderBase();
   return `${base}/search_by_cid?cid={CID}`;
@@ -251,6 +277,44 @@ function getEntryDateMs(entry) {
   if (raw == null || raw === '') return 0;
   const ms = new Date(raw).getTime();
   return Number.isNaN(ms) ? 0 : ms;
+}
+
+/** URL keys used for "View skill on" link and for parsing post id. Same order as UI: wordpress_url, link. */
+const ENTRY_LINK_KEYS = ['wordpress_url', 'link', 'guid', 'download_url', 'url', 'permalink', 'view_url', 'page_url', 'skill_url'];
+
+/** Get the view/skill page URL from API entry (same link as "View skill on" in the UI). */
+function getPostLinkFromEntry(entry) {
+  if (!entry) return null;
+  for (const key of ENTRY_LINK_KEYS) {
+    const v = entry[key];
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return null;
+}
+
+/** Resolve WordPress post ID and view link from API entry. Returns { postId, postLink }. */
+function resolvePostIdFromEntry(entry) {
+  const postLink = getPostLinkFromEntry(entry);
+  const fromField = (v) => {
+    if (v == null) return null;
+    const n = typeof v === 'number' ? v : parseInt(String(v).trim(), 10);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
+  let postId = fromField(entry.id) ?? fromField(entry.ID) ?? fromField(entry.post_id);
+  if (postId != null) return { postId, postLink: postLink || null };
+  const urls = postLink ? [postLink] : ENTRY_LINK_KEYS.map((k) => entry[k]).filter(Boolean);
+  for (const url of urls) {
+    const s = String(url).trim();
+    const m = s.match(/\/(?:file|post|posts|wp\/v2\/posts|skill|f|view)\/(\d+)(?:\/|$|\?)/i)
+      || s.match(/[?&]p=(\d+)(?:&|$)/)
+      || s.match(/[?&]post_id=(\d+)(?:&|$)/)
+      || s.match(/\/(\d+)(?:\/|$|\?)/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (Number.isInteger(n) && n > 0) return { postId: n, postLink: postLink || null };
+    }
+  }
+  return { postId: null, postLink };
 }
 
 /** Ask user for input via readline. Returns Promise<string>. */
@@ -421,9 +485,14 @@ async function runCliInstall(cid, options = {}, installRef) {
     }
 
     try {
+      const { postId, postLink } = resolvePostIdFromEntry(entry);
+      const hostname = await getProviderHostname();
       await updateDsoulJson(skillsFolder, 'add', {
         cid,
-        shortname: (installRef && installRef !== cid) ? installRef : null
+        shortname: (installRef && installRef !== cid) ? installRef : null,
+        post_id: postId,
+        post_link: postLink || null,
+        hostname: hostname || null
       });
     } catch (e) {
       // non-fatal
@@ -499,6 +568,8 @@ function getCliHelpText() {
     '  config [<key> [value]]     Set or view dsoul-provider, skills-folder, skills-folder-name',
     '  install [-g] [-y] <cid-or-shortname>   Install a skill by CID or shortname',
     '  uninstall <cid-or-shortname>           Uninstall a skill (CID or shortname)',
+    '  update [-g] [--local]                 Check for upgrades (global and/or local skills)',
+    '  upgrade [-g] [--local]                Upgrade skills to latest (uninstall old, install latest)',
     '  package <folder>          Package a folder (license.txt + skill.md) as zip',
     '  hash cidv0 <file>         Print CIDv0 (IPFS) hash of a file to the console',
     '  freeze <file> [opts]      Stamp a file (zip/js/css/md/txt) via DSOUL freeze API',
@@ -512,6 +583,10 @@ function getCliHelpText() {
     '  -g    Install to configured global skills folder',
     '  -y    Auto-pick oldest entry when multiple DSOUL entries exist',
     '',
+    'Options for update / upgrade:',
+    '  -g        Global skills folder only',
+    '  --local   Local project skills folder only',
+    '',
     'Options for freeze:',
     '  --shortname=NAME   Register shortname (username@NAME:version); fails if taken',
     '  --tags=tag1,tag2   Comma-separated tags (or hashtags)',
@@ -524,6 +599,207 @@ function getCliHelpText() {
     '  --per_page=N   Items per page (default: 100, max: 500)',
     ''
   ].join('\n');
+}
+
+/** Fetch upgrade graph for a post. GET .../file/{post_id_or_link}/graph. postIdOrLink can be numeric id or the view URL. */
+async function fetchUpgradeGraph(postIdOrLink) {
+  if (postIdOrLink == null || String(postIdOrLink).trim() === '') return { success: false, error: 'Missing post_id or post_link' };
+  const base = await getDsoulProviderBase();
+  const url = `${base}/file/${encodeURIComponent(String(postIdOrLink))}/graph`;
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}: ${text || res.statusText}` };
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      return { success: false, error: 'Invalid JSON from graph API' };
+    }
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err && (err.message || String(err)) };
+  }
+}
+
+/** Follow the next chain in nodes from startCid until the tail; returns that final cid or startCid if no next. */
+function followNextChainToTail(nodes, startCid) {
+  if (!nodes || !startCid) return startCid;
+  let cid = String(startCid).trim();
+  const seen = new Set();
+  while (nodes[cid] && nodes[cid].next) {
+    const nextCid = String(nodes[cid].next).trim();
+    if (!nextCid || seen.has(nextCid)) break;
+    seen.add(cid);
+    cid = nextCid;
+  }
+  return cid;
+}
+
+/** From graph data, determine if an upgrade is available for installed cid. Returns { upgradeAvailable, latestCid?, reason }.
+ *  Supports: (1) nodes/current_cid/next chain (latest = final node after following all nexts), (2) latest_cid or latest, (3) versions[]. */
+function interpretGraphForUpgrade(graphData, installedCid) {
+  if (!graphData || !installedCid) return { upgradeAvailable: false, latestCid: null, reason: 'no data' };
+
+  const nodes = graphData.nodes && typeof graphData.nodes === 'object' ? graphData.nodes : null;
+  const currentCid = graphData.current_cid && String(graphData.current_cid).trim();
+  if (nodes && currentCid && nodes[currentCid]) {
+    const latestCid = followNextChainToTail(nodes, currentCid);
+    if (latestCid && latestCid !== installedCid) {
+      return { upgradeAvailable: true, latestCid, reason: `Newer version: ${latestCid}` };
+    }
+    return { upgradeAvailable: false, latestCid: latestCid || currentCid, reason: 'Up to date' };
+  }
+
+  const latest = graphData.latest_cid ?? graphData.latest ?? (Array.isArray(graphData.versions) && graphData.versions.length > 0 ? graphData.versions[graphData.versions.length - 1] : null);
+  const latestCid = typeof latest === 'string' ? latest.trim() : (latest && latest.cid ? latest.cid : null);
+  if (latestCid && latestCid !== installedCid) {
+    return { upgradeAvailable: true, latestCid, reason: `Newer version: ${latestCid}` };
+  }
+  if (latestCid && latestCid === installedCid) {
+    return { upgradeAvailable: false, latestCid, reason: 'Up to date' };
+  }
+  return { upgradeAvailable: false, latestCid: null, reason: 'Unknown (no version info in graph)' };
+}
+
+/** True if both paths resolve to the same directory (case-sensitive; CIDs in paths are case-sensitive). */
+function sameResolvedDir(dirA, dirB) {
+  if (!dirA || !dirB) return false;
+  return path.resolve(dirA) === path.resolve(dirB);
+}
+
+async function runCliUpdate(cliArgs) {
+  const settings = await loadSettings();
+  const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
+  const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'Skills';
+  const localFolder = path.join(process.cwd(), folderName);
+
+  const folders = [];
+  if (cliArgs.globalOnly && globalFolder) folders.push({ dir: globalFolder, label: 'global' });
+  else if (cliArgs.localOnly) folders.push({ dir: localFolder, label: 'local' });
+  else {
+    if (globalFolder) folders.push({ dir: globalFolder, label: 'global' });
+    if (!globalFolder || !sameResolvedDir(globalFolder, localFolder)) {
+      folders.push({ dir: localFolder, label: 'local' });
+    }
+  }
+
+  let hadSkills = false;
+  let hadError = false;
+  for (const { dir, label } of folders) {
+    let data;
+    try {
+      data = await readDsoulJson(dir);
+    } catch (e) {
+      console.error(`Failed to read ${label} dsoul.json (${dir}):`, e.message || e);
+      hadError = true;
+      continue;
+    }
+    const skills = Array.isArray(data.skills) ? data.skills : [];
+    if (skills.length === 0) continue;
+    hadSkills = true;
+    console.log(`\n--- ${label} (${dir}) ---`);
+    for (const skill of skills) {
+      const cid = skill.cid || '';
+      const name = skill.shortname || cid || '?';
+      const postIdOrLink = skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null;
+      if (postIdOrLink == null) {
+        console.log(`${name}: no post_id or post_link (reinstall to record for update check)`);
+        continue;
+      }
+      const result = await fetchUpgradeGraph(postIdOrLink);
+      if (!result.success) {
+        console.log(`${name}: ${result.error}`);
+        hadError = true;
+        continue;
+      }
+      const { upgradeAvailable, latestCid, reason } = interpretGraphForUpgrade(result.data, cid);
+      if (upgradeAvailable) {
+        console.log(`${name}: upgrade available > ${latestCid}`);
+      } else {
+        console.log(`${name}: ${reason}`);
+      }
+    }
+  }
+  if (!hadSkills) {
+    console.log('No installed skills found in global or local dsoul.json.');
+  }
+  return !hadError;
+}
+
+async function runCliUpgrade(cliArgs) {
+  await ensureDataDir();
+  const settings = await loadSettings();
+  const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
+  const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'Skills';
+  const localFolder = path.join(process.cwd(), folderName);
+
+  const folders = [];
+  if (cliArgs.globalOnly && globalFolder) folders.push({ dir: globalFolder, label: 'global' });
+  else if (cliArgs.localOnly) folders.push({ dir: localFolder, label: 'local' });
+  else {
+    if (globalFolder) folders.push({ dir: globalFolder, label: 'global' });
+    if (!globalFolder || !sameResolvedDir(globalFolder, localFolder)) {
+      folders.push({ dir: localFolder, label: 'local' });
+    }
+  }
+
+  const toUpgrade = [];
+  for (const { dir, label } of folders) {
+    let data;
+    try {
+      data = await readDsoulJson(dir);
+    } catch (e) {
+      console.error(`Failed to read ${label} dsoul.json (${dir}):`, e.message || e);
+      continue;
+    }
+    const skills = Array.isArray(data.skills) ? data.skills : [];
+    for (const skill of skills) {
+      const cid = skill.cid || '';
+      const name = skill.shortname || cid || '?';
+      const postIdOrLink = skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null;
+      if (postIdOrLink == null) continue;
+      const result = await fetchUpgradeGraph(postIdOrLink);
+      if (!result.success) continue;
+      const { upgradeAvailable, latestCid } = interpretGraphForUpgrade(result.data, cid);
+      if (upgradeAvailable && latestCid) {
+        toUpgrade.push({ currentCid: cid, latestCid, name, dir, label });
+      }
+    }
+  }
+
+  if (toUpgrade.length === 0) {
+    console.log('No upgrades available.');
+    return true;
+  }
+
+  let hadError = false;
+  for (const { currentCid, latestCid, name, dir, label } of toUpgrade) {
+    console.log(`\n--- ${label}: upgrading ${name} ${currentCid} > ${latestCid} ---`);
+    try {
+      await updateDsoulJson(dir, 'remove', { cid: currentCid });
+    } catch (e) {
+      console.error('  update dsoul.json remove:', e.message || e);
+      hadError = true;
+      continue;
+    }
+    const deactivateResult = await doDeactivateFile(currentCid);
+    if (!deactivateResult.success) {
+      console.warn('  deactivate (continuing):', deactivateResult.error);
+    }
+    const deleteResult = await doDeleteFile(currentCid);
+    if (!deleteResult.success) {
+      console.error('  delete failed:', deleteResult.error);
+      hadError = true;
+      continue;
+    }
+    const installOptions = { skillsFolder: dir, autoPickOldest: true };
+    const ok = await runCliInstall(latestCid, installOptions, latestCid);
+    if (!ok) hadError = true;
+  }
+  return !hadError;
 }
 
 async function runCliRegister() {
@@ -891,7 +1167,14 @@ async function updateDsoulJson(skillsFolder, action, item) {
   const data = await readDsoulJson(skillsFolder);
   if (action === 'add') {
     const existing = data.skills.findIndex((s) => s.cid === item.cid);
-    const entry = { cid: item.cid, shortname: item.shortname ?? null };
+    const hostname = item.hostname != null && String(item.hostname).trim() ? String(item.hostname).trim() : null;
+    const entry = {
+      cid: item.cid,
+      shortname: item.shortname ?? null,
+      post_id: item.post_id != null ? item.post_id : null,
+      post_link: item.post_link != null && String(item.post_link).trim() ? String(item.post_link).trim() : null,
+      hostname: hostname
+    };
     if (existing >= 0) {
       data.skills[existing] = entry;
     } else {
@@ -1048,6 +1331,16 @@ app.whenReady().then(async () => {
   }
   if (cliArgs && cliArgs.command === 'package') {
     const ok = await runCliPackage(cliArgs.folder);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'update') {
+    const ok = await runCliUpdate(cliArgs);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'upgrade') {
+    const ok = await runCliUpgrade(cliArgs);
     process.exit(ok ? 0 : 1);
     return;
   }
@@ -1410,7 +1703,9 @@ async function doActivateFile(cid, options) {
     await fs.writeFile(filepath, JSON.stringify(fileData, null, 2), 'utf-8');
 
     try {
-      await updateDsoulJson(baseFolder, 'add', { cid, shortname: null });
+      const { postId, postLink } = resolvePostIdFromEntry(fileData.dsoulEntry);
+      const hostname = await getProviderHostname();
+      await updateDsoulJson(baseFolder, 'add', { cid, shortname: null, post_id: postId, post_link: postLink || null, hostname: hostname || null });
     } catch (_) {}
 
     return { success: true };

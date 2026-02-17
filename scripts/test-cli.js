@@ -112,6 +112,12 @@ function parseCidFromOutput(output) {
   return m ? m[1] : null;
 }
 
+/** Parse "upgrade available > CID" from dsoul update output. Returns null if not found. */
+function parseUpgradeAvailableCid(output) {
+  const m = output.match(/upgrade available\s*[>→]\s*(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z0-9]{58,})/i);
+  return m ? m[1] : null;
+}
+
 function printCmd(args) {
   console.log('  $ dsoul', args.join(' '));
 }
@@ -334,6 +340,80 @@ async function main() {
     console.log('  skills dir contents:', entries.join(', '));
     if (skillEntries.length > 0) throw new Error(`Skills folder should be empty of skills after uninstall: ${skillEntries.join(', ')}`);
   });
+
+  const historyTestCid = (config.history_test && config.history_test.trim()) || null;
+  if (historyTestCid) {
+    step('history test: install history_test CID', async () => {
+      console.log('  waiting', INSTALL_WAIT_MS / 1000, 's for server...');
+      await new Promise((r) => setTimeout(r, INSTALL_WAIT_MS));
+      const args = ['install', '-g', '-y', historyTestCid];
+      printCmd(args);
+      const r = await runDsoulCapture(args);
+      if (r.code !== 0) {
+        printCliOutput(r);
+        throw new Error(`history_test install failed (exit ${r.code})`);
+      }
+      printStepOutput(r.stdout);
+    });
+
+    step('history test: check for upgrade (dsoul update -g)', async () => {
+      const args = ['update', '-g'];
+      printCmd(args);
+      const r = await runDsoulCapture(args);
+      if (r.code !== 0) {
+        printCliOutput(r);
+        throw new Error(`update failed (exit ${r.code})`);
+      }
+      const combined = (r.stdout + '\n' + r.stderr).trim();
+      if (!combined.includes(historyTestCid) && !combined.includes('Up to date') && !combined.includes('upgrade available')) {
+        printCliOutput(r);
+        throw new Error('update output should mention the skill (CID, "Up to date", or "upgrade available")');
+      }
+      printStepOutput(r.stdout);
+      printStepOutput(r.stderr);
+    });
+
+    step('history test: upgrade if available (dsoul upgrade -g)', async () => {
+      const args = ['upgrade', '-g'];
+      printCmd(args);
+      const r = await runDsoulCapture(args);
+      if (r.code !== 0) {
+        printCliOutput(r);
+        throw new Error(`upgrade failed (exit ${r.code})`);
+      }
+      printStepOutput(r.stdout);
+      printStepOutput(r.stderr);
+    });
+
+    step('history test: uninstall', async () => {
+      const dsoulPath = path.join(skillsDir, 'dsoul.json');
+      let cidsToUninstall = [historyTestCid];
+      try {
+        const raw = await fs.readFile(dsoulPath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.skills) && data.skills.length > 0) {
+          cidsToUninstall = data.skills.map((s) => s.cid).filter(Boolean);
+        }
+      } catch (_) {}
+      for (const cid of cidsToUninstall) {
+        const args = ['uninstall', cid];
+        printCmd(args);
+        const r = await runDsoulCapture(args);
+        if (r.code !== 0) {
+          printCliOutput(r);
+          throw new Error(`history_test uninstall ${cid} failed (exit ${r.code})`);
+        }
+        printStepOutput(r.stdout);
+      }
+    });
+
+    step('history test: verify skill removed', async () => {
+      const entries = await fs.readdir(skillsDir);
+      const skillEntries = entries.filter((e) => e !== 'dsoul.json');
+      console.log('  skills dir contents:', entries.join(', '));
+      if (skillEntries.length > 0) throw new Error(`Skills folder should be empty after history_test uninstall: ${skillEntries.join(', ')}`);
+    });
+  }
 
   console.log('\n--- Running', steps.length, 'steps ---\n');
   for (let i = 0; i < steps.length; i++) {
