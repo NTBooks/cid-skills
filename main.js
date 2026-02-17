@@ -83,6 +83,12 @@ function getCliArgs() {
     });
     return { command: 'freeze', ...opts };
   }
+  if (cmd === 'hash') {
+    const sub = argv[3];
+    const file = (argv[4] || '').trim();
+    if (sub === 'cidv0' && file) return { command: 'hash', subcommand: 'cidv0', file };
+    return null;
+  }
   return null;
 }
 
@@ -494,6 +500,7 @@ function getCliHelpText() {
     '  install [-g] [-y] <cid-or-shortname>   Install a skill by CID or shortname',
     '  uninstall <cid-or-shortname>           Uninstall a skill (CID or shortname)',
     '  package <folder>          Package a folder (license.txt + skill.md) as zip',
+    '  hash cidv0 <file>         Print CIDv0 (IPFS) hash of a file to the console',
     '  freeze <file> [opts]      Stamp a file (zip/js/css/md/txt) via DSOUL freeze API',
     '  balance                   Check stamp/credit balance (uses stored credentials)',
     '  files [opts]              List your frozen files (uses stored credentials)',
@@ -564,6 +571,19 @@ async function runCliUnregister() {
     return true;
   } catch (err) {
     console.error('Unregister failed:', err.message || String(err));
+    return false;
+  }
+}
+
+async function runCliHashCidv0(filePath) {
+  try {
+    const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+    const buf = await fs.readFile(resolved);
+    const cid = await Hash.of(buf, { cidVersion: 0 });
+    console.log(cid);
+    return true;
+  } catch (err) {
+    console.error('Hash failed:', err.message || String(err));
     return false;
   }
 }
@@ -1033,6 +1053,11 @@ app.whenReady().then(async () => {
   }
   if (cliArgs && cliArgs.command === 'freeze') {
     const ok = await runCliFreeze(cliArgs);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'hash' && cliArgs.subcommand === 'cidv0') {
+    const ok = await runCliHashCidv0(cliArgs.file);
     process.exit(ok ? 0 : 1);
     return;
   }
