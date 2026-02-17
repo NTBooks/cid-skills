@@ -1355,6 +1355,15 @@ app.whenReady().then(async () => {
     return;
   }
 
+  // User passed CLI args but they were invalid → print error and exit (do not open GUI)
+  const hasCliArgs = process.argv.length > 2;
+  if (hasCliArgs && !cliArgs) {
+    printCliDisclaimer();
+    console.error('Invalid command.');
+    process.exit(1);
+    return;
+  }
+
   // Remove menu bar completely
   Menu.setApplicationMenu(null);
   

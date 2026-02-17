@@ -11,4 +11,8 @@ token=
 # DSOUL API host (optional; default https://dsoul.org)
 # dsoul_provider=https://dsoul.org
 
+# For API Test A (supercede ownership fail): CID or Post ID of a file owned by another user.
+# If set, test verifies 400 + not_owner_supercede when trying to supercede that file.
+# other_user_cid=
+
 history_test=QmZTJS5PJYjMCcwDMCKHaiT9CdZ697Y7eTZRPbnVmtdZNU
