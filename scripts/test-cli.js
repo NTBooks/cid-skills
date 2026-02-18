@@ -297,11 +297,15 @@ async function main() {
 
   step('create test folder and package', async () => {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const pkgDir = path.join(testDir, `pkg-${id}`);
-    await fs.mkdir(pkgDir, { recursive: true });
-    await fs.writeFile(path.join(pkgDir, 'license.txt'), 'MIT\n', 'utf-8');
-    await fs.writeFile(path.join(pkgDir, 'skill.md'), `# Test Package ${id}\n\nTest skill for CLI.\n`, 'utf-8');
-    console.log('  created', pkgDir, '(license.txt, skill.md)');
+    const pkgName = `pkg-${id}`;
+    const pkgDir = path.join(testDir, pkgName);
+    printCmd(['init', pkgName]);
+    const initResult = await runDsoulCapture(['init', pkgName], { cwd: testDir });
+    if (initResult.code !== 0) {
+      printCliOutput(initResult);
+      throw new Error(`init failed (exit ${initResult.code})`);
+    }
+    printStepOutput(initResult.stdout);
     const args = ['package', pkgDir];
     printCmd(args);
     const r = await runDsoulCapture(args);

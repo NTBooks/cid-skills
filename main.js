@@ -102,6 +102,11 @@ function getCliArgs() {
     if (sub === 'cidv0' && file) return { command: 'hash', subcommand: 'cidv0', file };
     return null;
   }
+  if (cmd === 'init') {
+    const directory = (argv[3] || '').trim();
+    if (!directory) return null;
+    return { command: 'init', directory };
+  }
   return null;
 }
 
@@ -509,6 +514,54 @@ async function runCliInstall(cid, options = {}, installRef) {
 
 const PACKAGE_REQUIRED_FILES = ['license.txt', 'skill.md'];
 
+function buildInitSkillMdContent(authorUsername) {
+  const authorLine = typeof authorUsername === 'string' && authorUsername.trim()
+    ? 'author: ' + authorUsername.trim()
+    : 'author: ';
+  return [
+    '---',
+    'name: ',
+    'description: ',
+    authorLine,
+    '---',
+    '',
+    ''
+  ].join('\n');
+}
+
+async function runCliInit(directoryArg) {
+  try {
+    const resolved = path.resolve(process.cwd(), directoryArg);
+    const stat = await fs.stat(resolved).catch((e) => null);
+    if (stat) {
+      if (!stat.isDirectory()) {
+        console.error('Init failed: path exists and is not a directory:', resolved);
+        return false;
+      }
+      const entries = await fs.readdir(resolved, { withFileTypes: true });
+      if (entries.length > 0) {
+        console.error('Init failed: directory is not empty:', resolved);
+        return false;
+      }
+    } else {
+      await fs.mkdir(resolved, { recursive: true });
+    }
+    const credentials = await loadWpCredentials();
+    const skillMdContent = buildInitSkillMdContent(credentials ? credentials.username : null);
+    const skillMdPath = path.join(resolved, 'skill.md');
+    await fs.writeFile(skillMdPath, skillMdContent, 'utf-8');
+    const licensePath = path.join(resolved, 'license.txt');
+    await fs.writeFile(licensePath, 'No License', 'utf-8');
+    console.log('Created:', resolved);
+    console.log('  skill.md   (header template' + (credentials ? ', author: ' + credentials.username : '') + ')');
+    console.log('  license.txt (No License)');
+    return true;
+  } catch (err) {
+    console.error('Init failed:', err.message || String(err));
+    return false;
+  }
+}
+
 async function runCliPackage(folderArg) {
   try {
     const resolved = path.resolve(process.cwd(), folderArg);
@@ -570,6 +623,7 @@ function getCliHelpText() {
     '  uninstall <cid-or-shortname>           Uninstall a skill (CID or shortname)',
     '  update [-g] [--local]                 Check for upgrades (global and/or local skills)',
     '  upgrade [-g] [--local]                Upgrade skills to latest (uninstall old, install latest)',
+    '  init <directory>          Create a folder with skill.md template and blank license.txt',
     '  package <folder>          Package a folder (license.txt + skill.md) as zip',
     '  hash cidv0 <file>         Print CIDv0 (IPFS) hash of a file to the console',
     '  freeze <file> [opts]      Stamp a file (zip/js/css/md/txt) via DSOUL freeze API',
@@ -704,9 +758,9 @@ async function runCliUpdate(cliArgs) {
     for (const skill of skills) {
       const cid = skill.cid || '';
       const name = skill.shortname || cid || '?';
-      const postIdOrLink = skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null;
+      const postIdOrLink = skill.num != null ? skill.num : (skill.src && String(skill.src).trim()) || (skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null);
       if (postIdOrLink == null) {
-        console.log(`${name}: no post_id or post_link (reinstall to record for update check)`);
+        console.log(`${name}: no num or src (reinstall to record for update check)`);
         continue;
       }
       const result = await fetchUpgradeGraph(postIdOrLink);
@@ -759,7 +813,7 @@ async function runCliUpgrade(cliArgs) {
     for (const skill of skills) {
       const cid = skill.cid || '';
       const name = skill.shortname || cid || '?';
-      const postIdOrLink = skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null;
+      const postIdOrLink = skill.num != null ? skill.num : (skill.src && String(skill.src).trim()) || (skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null);
       if (postIdOrLink == null) continue;
       const result = await fetchUpgradeGraph(postIdOrLink);
       if (!result.success) continue;
@@ -1171,8 +1225,8 @@ async function updateDsoulJson(skillsFolder, action, item) {
     const entry = {
       cid: item.cid,
       shortname: item.shortname ?? null,
-      post_id: item.post_id != null ? item.post_id : null,
-      post_link: item.post_link != null && String(item.post_link).trim() ? String(item.post_link).trim() : null,
+      num: item.post_id != null ? item.post_id : null,
+      src: item.post_link != null && String(item.post_link).trim() ? String(item.post_link).trim() : null,
       hostname: hostname
     };
     if (existing >= 0) {
@@ -1326,6 +1380,11 @@ app.whenReady().then(async () => {
     const installOptions = cliArgs.global ? {} : { skillsFolder: path.join(process.cwd(), installBase) };
     if (cliArgs.yes) installOptions.autoPickOldest = true;
     const ok = await runCliInstall(cid, installOptions, cliArgs.target);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs && cliArgs.command === 'init') {
+    const ok = await runCliInit(cliArgs.directory);
     process.exit(ok ? 0 : 1);
     return;
   }
