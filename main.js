@@ -22,12 +22,14 @@ function printCliDisclaimer() {
   process.stderr.write(msg);
 }
 
-// CLI: parse "install" or "config" commands. argv[2] = command, then command-specific args.
+// CLI: parse commands. In packaged app (AppImage, etc.) argv[1] is first user arg; in dev argv[2] is.
 function getCliArgs() {
   const argv = process.argv;
-  const cmd = argv[2];
+  const cmdIndex = app.isPackaged ? 1 : 2;
+  const argIndex = cmdIndex + 1;
+  const cmd = argv[cmdIndex];
   if (cmd === 'install') {
-    const rest = argv.slice(3);
+    const rest = argv.slice(argIndex);
     const global = rest.includes('-g');
     const yes = rest.includes('-y');
     const target = rest.find((a) => a !== '-g' && a !== '-y' && !a.startsWith('-'));
@@ -35,8 +37,8 @@ function getCliArgs() {
     return { command: 'install', target: String(target).trim(), global, yes };
   }
   if (cmd === 'config') {
-    const key = argv[3];
-    const value = argv[4];
+    const key = argv[argIndex];
+    const value = argv[argIndex + 1];
     const validKeys = ['dsoul-provider', 'skills-folder', 'skills-folder-name'];
     if (!key || !validKeys.includes(key)) return null;
     return {
@@ -46,12 +48,12 @@ function getCliArgs() {
     };
   }
   if (cmd === 'uninstall') {
-    const target = (argv[3] || '').trim();
+    const target = (argv[argIndex] || '').trim();
     if (!target) return null;
     return { command: 'uninstall', target };
   }
   if (cmd === 'package') {
-    const folder = (argv[3] || '').trim();
+    const folder = (argv[argIndex] || '').trim();
     if (!folder) return null;
     return { command: 'package', folder };
   }
@@ -59,7 +61,7 @@ function getCliArgs() {
   if (cmd === 'unregister') return { command: 'unregister' };
   if (cmd === 'help' || cmd === '-h' || cmd === '--help') return { command: 'help' };
   if (cmd === 'update') {
-    const rest = argv.slice(3);
+    const rest = argv.slice(argIndex);
     const globalOnly = rest.includes('-g');
     const localOnly = rest.includes('--local');
     let deleteBlocked;
@@ -68,7 +70,7 @@ function getCliArgs() {
     return { command: 'update', globalOnly, localOnly, deleteBlocked };
   }
   if (cmd === 'upgrade') {
-    const rest = argv.slice(3);
+    const rest = argv.slice(argIndex);
     const globalOnly = rest.includes('-g');
     const localOnly = rest.includes('--local');
     const yes = rest.includes('-y');
@@ -76,7 +78,7 @@ function getCliArgs() {
   }
   if (cmd === 'balance') return { command: 'balance' };
   if (cmd === 'files') {
-    const rest = argv.slice(3);
+    const rest = argv.slice(argIndex);
     const opts = { page: 1, per_page: 100 };
     rest.forEach((a) => {
       if (a.startsWith('--page=')) opts.page = parseInt(a.slice(7), 10) || 1;
@@ -85,7 +87,7 @@ function getCliArgs() {
     return { command: 'files', ...opts };
   }
   if (cmd === 'freeze') {
-    const rest = argv.slice(3);
+    const rest = argv.slice(argIndex);
     const nonFlags = rest.filter((a) => !a.startsWith('--'));
     const file = nonFlags.length ? nonFlags.join(' ').trim() : '';
     if (!file) return null;
@@ -100,13 +102,13 @@ function getCliArgs() {
     return { command: 'freeze', ...opts };
   }
   if (cmd === 'hash') {
-    const sub = argv[3];
-    const file = (argv[4] || '').trim();
+    const sub = argv[argIndex];
+    const file = (argv[argIndex + 1] || '').trim();
     if (sub === 'cidv0' && file) return { command: 'hash', subcommand: 'cidv0', file };
     return null;
   }
   if (cmd === 'init') {
-    const directory = (argv[3] || '').trim();
+    const directory = (argv[argIndex] || '').trim();
     if (!directory) return null;
     return { command: 'init', directory };
   }
@@ -564,7 +566,7 @@ async function runCliInstall(cid, options = {}, installRef) {
     }
     const { postId: metricsPostId } = resolvePostIdFromEntry(entry);
     if (metricsPostId) {
-      recordFileMetric(metricsPostId, 'view').catch(() => {});
+      recordFileMetric(metricsPostId, 'view').catch(() => { });
     }
     const isBundle = !!(entry.is_skill_bundle ?? entry.is_bundle);
 
@@ -646,7 +648,7 @@ async function runCliInstall(cid, options = {}, installRef) {
 
     const { postId, postLink } = resolvePostIdFromEntry(entry);
     if (postId) {
-      recordFileMetric(postId, 'download').catch(() => {});
+      recordFileMetric(postId, 'download').catch(() => { });
     }
     try {
       const hostname = await getProviderHostname();
@@ -1468,17 +1470,17 @@ function createWindow() {
 
   // Remove menu bar completely
   mainWindow.setMenuBarVisibility(false);
-  
+
   // Open DevTools (you can comment this out if you don't want it to open automatically)
   // mainWindow.webContents.openDevTools();
-  
+
   // Add keyboard shortcut to toggle DevTools (F12 or Ctrl+Shift+I)
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
       mainWindow.webContents.toggleDevTools();
     }
   });
-  
+
   mainWindow.loadFile('index.html');
 }
 
@@ -1568,7 +1570,7 @@ app.whenReady().then(async () => {
     const uninstallBaseFolder = existing.activatedSkillsFolder || (await loadSettings()).skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
     try {
       if (uninstallBaseFolder) await updateDsoulJson(uninstallBaseFolder, 'remove', { cid });
-    } catch (_) {}
+    } catch (_) { }
     const deactivateResult = await doDeactivateFile(cid);
     if (!deactivateResult.success && existing.active) {
       console.warn('Could not deactivate (removing from app anyway):', deactivateResult.error);
@@ -1645,7 +1647,7 @@ app.whenReady().then(async () => {
   }
 
   // User passed CLI args but they were invalid → print error and exit (do not open GUI)
-  const hasCliArgs = process.argv.length > 2;
+  const hasCliArgs = app.isPackaged ? process.argv.length > 1 : process.argv.length > 2;
   if (hasCliArgs && !cliArgs) {
     printCliDisclaimer();
     console.error('Invalid command.');
@@ -1655,7 +1657,7 @@ app.whenReady().then(async () => {
 
   // Remove menu bar completely
   Menu.setApplicationMenu(null);
-  
+
   await ensureDataDir();
   createWindow();
 
@@ -1716,7 +1718,7 @@ async function doDeleteFile(cid) {
     try {
       const content = await fs.readFile(filepath, 'utf-8');
       fileData = JSON.parse(content);
-    } catch (_) {}
+    } catch (_) { }
     await fs.unlink(filepath);
     if (fileData && (fileData.is_skill_bundle || fileData.is_bundle)) {
       const zipPath = path.join(dataDir, `${cid}.zip`);
@@ -1856,7 +1858,7 @@ ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
   });
-  
+
   if (!result.canceled && result.filePaths.length > 0) {
     return { success: true, path: result.filePaths[0] };
   }
@@ -1977,15 +1979,15 @@ async function doActivateFile(cid, options) {
             extractEntryToFileNoOverwrite(zipfile, entry, skillDir, mainAsSkillMd).then(() => {
               zipfile.readEntry();
             }, (e) => {
-              if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) {} reject(e); }
+              if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) { } reject(e); }
             });
           });
           zipfile.on('end', () => {
-            if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) {} resolve(); }
+            if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) { } resolve(); }
           });
           zipfile.on('error', (e) => {
             if (e && (e.message === 'closed' || e.message === 'Closed')) return;
-            if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) {} reject(e); }
+            if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) { } reject(e); }
           });
           zipfile.readEntry();
         });
@@ -2004,7 +2006,7 @@ async function doActivateFile(cid, options) {
       const { postId, postLink } = resolvePostIdFromEntry(fileData.dsoulEntry);
       const hostname = await getProviderHostname();
       await updateDsoulJson(baseFolder, 'add', { cid, shortname: null, post_id: postId, post_link: postLink || null, hostname: hostname || null });
-    } catch (_) {}
+    } catch (_) { }
 
     return { success: true };
   } catch (error) {
@@ -2118,7 +2120,7 @@ ipcMain.handle('validate-zip-skill-bundle', async (event, buffer) => {
   } catch (error) {
     return { success: false, error: error.message };
   } finally {
-    await fs.unlink(tmpPath).catch(() => {});
+    await fs.unlink(tmpPath).catch(() => { });
   }
 });
 
@@ -2152,7 +2154,7 @@ async function doDeactivateFile(cid) {
 
     try {
       if (baseFolder) await updateDsoulJson(baseFolder, 'remove', { cid });
-    } catch (_) {}
+    } catch (_) { }
 
     if (fileData.activatedFolderName) {
       if (!baseFolder) {

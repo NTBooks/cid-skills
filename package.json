@@ -14,6 +14,7 @@
     "dist:win": "electron-builder --win && npm run cleanup:dist",
     "dist:mac": "electron-builder --mac && npm run cleanup:dist",
     "dist:linux": "electron-builder --linux && npm run cleanup:dist",
+    "dist:linux:wsl": "wsl bash -l -c \"cd \\\"$(wslpath '%cd%')\\\" && npm run dist:linux\"",
     "cleanup:dist": "node scripts/cleanup-dist.js",
     "test:cli": "node scripts/test-cli.js"
   },
