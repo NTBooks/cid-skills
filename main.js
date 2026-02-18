@@ -62,7 +62,10 @@ function getCliArgs() {
     const rest = argv.slice(3);
     const globalOnly = rest.includes('-g');
     const localOnly = rest.includes('--local');
-    return { command: 'update', globalOnly, localOnly };
+    let deleteBlocked;
+    if (rest.includes('--delete-blocked')) deleteBlocked = true;
+    else if (rest.includes('--no-delete-blocked')) deleteBlocked = false;
+    return { command: 'update', globalOnly, localOnly, deleteBlocked };
   }
   if (cmd === 'upgrade') {
     const rest = argv.slice(3);
@@ -204,6 +207,131 @@ async function resolveShortname(shortname) {
   } catch (err) {
     return { success: false, error: err && (err.message || String(err)) };
   }
+}
+
+const BLOCKLIST_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function getBlocklistCachePath() {
+  return path.join(userDataPath, 'blocklist.json');
+}
+
+async function fetchBlocklistFromApi() {
+  try {
+    const base = await getDsoulProviderBase();
+    const url = `${base}/blocklist`;
+    if (process.env.DSOUL_DEBUG) {
+      process.stderr.write(`Blocklist API URL: ${url}\n`);
+    }
+    const res = await fetch(url);
+    const text = await res.text();
+    if (process.env.DSOUL_DEBUG) {
+      process.stderr.write(`Blocklist API raw response (HTTP ${res.status}): ${text.slice(0, 2000)}${text.length > 2000 ? '...' : ''}\n`);
+    }
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}: ${text || res.statusText}` };
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      return { success: false, error: 'Invalid JSON from blocklist' };
+    }
+    const list = Array.isArray(data) ? data : (data && Array.isArray(data.cids) ? data.cids : (data && data.cids ? [data.cids] : []));
+    const cids = list
+      .map((c) => (typeof c === 'string' ? c : (c && typeof c === 'object' && typeof c.cid === 'string' ? c.cid : null)))
+      .filter((c) => c != null && c.trim())
+      .map((c) => c.trim());
+    if (process.env.DSOUL_DEBUG) {
+      process.stderr.write(`Blocklist parsed: ${cids.length} CID(s) from keys: ${Array.isArray(data) ? 'root array' : Object.keys(data || {}).join(', ')}\n`);
+    }
+    return { success: true, cids };
+  } catch (err) {
+    return { success: false, error: err && (err.message || String(err)) };
+  }
+}
+
+async function loadBlocklistFromCache() {
+  try {
+    const filepath = getBlocklistCachePath();
+    const content = await fs.readFile(filepath, 'utf-8');
+    const data = JSON.parse(content);
+    const cids = Array.isArray(data.cids) ? data.cids : [];
+    const fetchedAt = typeof data.fetchedAt === 'number' ? data.fetchedAt : 0;
+    return { cids, fetchedAt };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function saveBlocklistToCache(cids) {
+  try {
+    const filepath = getBlocklistCachePath();
+    await fs.writeFile(filepath, JSON.stringify({ cids, fetchedAt: Date.now() }, null, 2), 'utf-8');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Get set of blocked CIDs. Use forceRefresh to bypass cache (e.g. on dsoul update). */
+async function getBlocklist(forceRefresh) {
+  let cids = [];
+  if (!forceRefresh) {
+    const cached = await loadBlocklistFromCache();
+    if (cached && cached.fetchedAt && (Date.now() - cached.fetchedAt) < BLOCKLIST_CACHE_MAX_AGE_MS) {
+      return new Set(cached.cids);
+    }
+    if (cached && cached.cids.length > 0) {
+      cids = cached.cids;
+    }
+  }
+  const result = await fetchBlocklistFromApi();
+  if (result.success && result.cids.length >= 0) {
+    cids = result.cids;
+    await saveBlocklistToCache(cids);
+  }
+  return new Set(cids);
+}
+
+/** Get all installed CIDs from global and local dsoul.json. Returns { cid, dir, label }[]. */
+async function getAllInstalledCids() {
+  const settings = await loadSettings();
+  const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
+  const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'Skills';
+  const localFolder = path.join(process.cwd(), folderName);
+  const folders = [];
+  if (globalFolder) folders.push({ dir: globalFolder, label: 'global' });
+  if (!globalFolder || path.resolve(globalFolder) !== path.resolve(localFolder)) {
+    folders.push({ dir: localFolder, label: 'local' });
+  }
+  const out = [];
+  for (const { dir, label } of folders) {
+    try {
+      const data = await readDsoulJson(dir);
+      const skills = Array.isArray(data.skills) ? data.skills : [];
+      for (const skill of skills) {
+        const cid = skill.cid || '';
+        if (cid) out.push({ cid, dir, label });
+      }
+    } catch (_) {
+      // skip
+    }
+  }
+  return out;
+}
+
+function printBlockedCidsWarning(blockedCids) {
+  if (!blockedCids || blockedCids.length === 0) return;
+  const lines = [
+    '',
+    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    '  WARNING: The following CIDs are on the blocklist and should not be used:',
+    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    ...blockedCids.map((c) => `  - ${c}`),
+    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    ''
+  ];
+  process.stderr.write(lines.join('\n'));
 }
 
 let mainWindow;
@@ -621,7 +749,7 @@ function getCliHelpText() {
     '  config [<key> [value]]     Set or view dsoul-provider, skills-folder, skills-folder-name',
     '  install [-g] [-y] <cid-or-shortname>   Install a skill by CID or shortname',
     '  uninstall <cid-or-shortname>           Uninstall a skill (CID or shortname)',
-    '  update [-g] [--local]                 Check for upgrades (global and/or local skills)',
+    '  update [-g] [--local] [--delete-blocked|--no-delete-blocked]  Check for upgrades; if blocked CIDs found, optionally delete them',
     '  upgrade [-g] [--local]                Upgrade skills to latest (uninstall old, install latest)',
     '  init <directory>          Create a folder with skill.md template and blank license.txt',
     '  package <folder>          Package a folder (license.txt + skill.md) as zip',
@@ -640,6 +768,8 @@ function getCliHelpText() {
     'Options for update / upgrade:',
     '  -g        Global skills folder only',
     '  --local   Local project skills folder only',
+    '  --delete-blocked   (update only) Delete all blocked items without prompting',
+    '  --no-delete-blocked  (update only) Do not delete blocked items, do not prompt',
     '',
     'Options for freeze:',
     '  --shortname=NAME   Register shortname (username@NAME:version); fails if taken',
@@ -724,7 +854,7 @@ function sameResolvedDir(dirA, dirB) {
   return path.resolve(dirA) === path.resolve(dirB);
 }
 
-async function runCliUpdate(cliArgs) {
+async function runCliUpdate(cliArgs, blocklist) {
   const settings = await loadSettings();
   const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
   const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'Skills';
@@ -780,10 +910,53 @@ async function runCliUpdate(cliArgs) {
   if (!hadSkills) {
     console.log('No installed skills found in global or local dsoul.json.');
   }
+
+  // If any installed CIDs are blocked, ask whether to delete all blocked items (or use --delete-blocked / --no-delete-blocked)
+  if (blocklist && blocklist.size > 0) {
+    const installed = await getAllInstalledCids();
+    const blocked = installed.filter((i) => blocklist.has(i.cid));
+    if (blocked.length > 0) {
+      let yes = false;
+      if (cliArgs.deleteBlocked === true) {
+        yes = true;
+      } else if (cliArgs.deleteBlocked === false) {
+        yes = false;
+      } else {
+        const answer = await askLine('Delete all blocked items? [y/N]: ');
+        yes = /^y(es)?$/i.test(answer.trim());
+      }
+      if (yes) {
+        const uniqueCids = [...new Set(blocked.map((b) => b.cid))];
+        for (const cid of uniqueCids) {
+          const dirs = blocked.filter((b) => b.cid === cid).map((b) => b.dir);
+          for (const dir of dirs) {
+            try {
+              await updateDsoulJson(dir, 'remove', { cid });
+            } catch (e) {
+              console.error(`  Failed to remove ${cid} from dsoul.json:`, e.message || e);
+              hadError = true;
+            }
+          }
+          const deactivateResult = await doDeactivateFile(cid);
+          if (!deactivateResult.success) {
+            console.warn(`  Deactivate ${cid}:`, deactivateResult.error);
+          }
+          const deleteResult = await doDeleteFile(cid);
+          if (!deleteResult.success) {
+            console.error(`  Delete ${cid}:`, deleteResult.error);
+            hadError = true;
+          } else {
+            console.log(`  Removed blocked: ${cid}`);
+          }
+        }
+      }
+    }
+  }
+
   return !hadError;
 }
 
-async function runCliUpgrade(cliArgs) {
+async function runCliUpgrade(cliArgs, blocklist) {
   await ensureDataDir();
   const settings = await loadSettings();
   const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
@@ -818,7 +991,7 @@ async function runCliUpgrade(cliArgs) {
       const result = await fetchUpgradeGraph(postIdOrLink);
       if (!result.success) continue;
       const { upgradeAvailable, latestCid } = interpretGraphForUpgrade(result.data, cid);
-      if (upgradeAvailable && latestCid) {
+      if (upgradeAvailable && latestCid && (!blocklist || !blocklist.has(latestCid))) {
         toUpgrade.push({ currentCid: cid, latestCid, name, dir, label });
       }
     }
@@ -1292,6 +1465,21 @@ app.whenReady().then(async () => {
     process.exit(ok ? 0 : 1);
     return;
   }
+  // For all other CLI commands: load blocklist (refresh on 'update'), warn if any installed CIDs are blocked
+  let blocklist = null;
+  if (cliArgs && cliArgs.command !== 'help') {
+    const forceRefresh = cliArgs.command === 'update';
+    blocklist = await getBlocklist(forceRefresh);
+    if (process.env.DSOUL_DEBUG) {
+      const cids = [...blocklist];
+      process.stderr.write(`Blocklist (${cids.length} CIDs): ${cids.join(', ') || '(none)'}\n`);
+    }
+    const installed = await getAllInstalledCids();
+    const blocked = installed.filter((i) => blocklist.has(i.cid));
+    if (blocked.length > 0) {
+      printBlockedCidsWarning([...new Set(blocked.map((b) => b.cid))]);
+    }
+  }
   if (cliArgs && cliArgs.command === 'balance') {
     const ok = await runCliBalance();
     process.exit(ok ? 0 : 1);
@@ -1376,6 +1564,11 @@ app.whenReady().then(async () => {
       console.log('Shortname resolution:');
       console.log(JSON.stringify(shortnameData, null, 2));
     }
+    if (blocklist && blocklist.has(cid)) {
+      console.error(`Cannot install: CID ${cid} is on the blocklist.`);
+      process.exit(1);
+      return;
+    }
     const installBase = cliArgs.global ? null : (await loadSettings()).skillsFolderName || 'Skills';
     const installOptions = cliArgs.global ? {} : { skillsFolder: path.join(process.cwd(), installBase) };
     if (cliArgs.yes) installOptions.autoPickOldest = true;
@@ -1394,12 +1587,12 @@ app.whenReady().then(async () => {
     return;
   }
   if (cliArgs && cliArgs.command === 'update') {
-    const ok = await runCliUpdate(cliArgs);
+    const ok = await runCliUpdate(cliArgs, blocklist);
     process.exit(ok ? 0 : 1);
     return;
   }
   if (cliArgs && cliArgs.command === 'upgrade') {
-    const ok = await runCliUpgrade(cliArgs);
+    const ok = await runCliUpgrade(cliArgs, blocklist);
     process.exit(ok ? 0 : 1);
     return;
   }

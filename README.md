@@ -168,6 +168,8 @@ Run **`dsoul help`** (or **`dsoul -h`** / **`dsoul --help`**) to list all comman
 dsoul install [-g] [-y] <cid-or-shortname>
 ```
 
+Blocked CIDs (from the provider blocklist) cannot be installed; the CLI will exit with an error.
+
 - **&lt;cid-or-shortname&gt;**
   - A valid IPFS CID (e.g. `QmXoypiz...`, `bafy...`) or `ipfs://Qm...`
   - Or a shortname (e.g. `user@project:v1`) if shortname resolution is configured
@@ -220,6 +222,29 @@ Examples:
 dsoul uninstall user@project:v1
 dsoul uninstall QmXoypiz...
 ```
+
+**Update (check for upgrades) and blocklist**
+
+```text
+dsoul update [-g] [--local] [--delete-blocked | --no-delete-blocked]
+```
+
+Checks for upgrades for installed skills (does not install). Refreshes the **blocklist** from the DSOUL provider; the blocklist is also refreshed when it is older than 6 hours.
+
+- **-g** – Global skills folder only.
+- **--local** – Local project skills folder only.
+- **--delete-blocked** – If any installed CIDs are on the blocklist, delete them without prompting.
+- **--no-delete-blocked** – If any installed CIDs are on the blocklist, do not prompt and do not delete.
+
+On every CLI command, installed skills are checked against the blocklist; if any match, a warning is printed. Blocked CIDs cannot be installed or upgraded to. When you run **update** without flags and there are blocked items installed, the CLI prompts: “Delete all blocked items? [y/N]:”.
+
+**Upgrade (install latest versions)**
+
+```text
+dsoul upgrade [-g] [--local] [-y]
+```
+
+Uninstalls old versions and installs the latest. Uses the same scope as **update** (-g / --local). Upgrades to a CID that is on the blocklist are skipped. **-y** auto-confirms when multiple entries exist.
 
 **Package a skill folder**
 
@@ -331,7 +356,9 @@ CLI behavior uses the same settings as the GUI. Configure them in the app (**Opt
 | Setting            | Description                                                                                                               | Env / Notes                                                                                     |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **Skills folder**  | Where activated skills are deployed when using **-g**.                                                                    | `DSOUL_SKILLS_FOLDER` (overrides Options when set)                                              |
-| **DSOUL provider** | Host only (e.g. `https://dsoul.org`). The app appends `/wp-json/diamond-soul/v1` for CID lookup and shortname resolution. | Leave empty to use `.env` or default (`https://dsoul.org`). Example: `https://donotreplace.com` |
+| **DSOUL provider** | Host only (e.g. `https://dsoul.org`). The app appends `/wp-json/diamond-soul/v1` for CID lookup, shortname resolution, and blocklist. | Leave empty to use `.env` or default (`https://dsoul.org`). Example: `https://donotreplace.com` |
+
+**Blocklist:** The CLI fetches a blocklist of CIDs from the provider and caches it (refreshed on **update** or when older than 6 hours). Blocked CIDs cannot be installed or upgraded to; a warning is shown when any installed skill is on the blocklist.
 
 **Notes:**
 

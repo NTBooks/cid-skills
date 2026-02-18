@@ -19,8 +19,11 @@ const binPath = path.join(projectRoot, 'bin', 'dsoul.js');
 const DSOUL_API_PATH = '/wp-json/diamond-soul/v1';
 const CLI_TIMEOUT_MS = 5000;
 const FREEZE_CLI_TIMEOUT_MS = 30000;
+const CLI_UPDATE_INTERACTIVE_TIMEOUT_MS = 20000;
 const INSTALL_WAIT_MS = 5000;
 const API_REQUEST_TIMEOUT_MS = 15000;
+/** Blocked CID used for blocklist tests (must be on provider blocklist). */
+const BLOCKED_TEST_CID = 'QmYe4hwZp2dYatuUvEs3Mir6WKPnY3uVkZAwXudb5pNWzY';
 
 function loadTestConfig() {
   const configPath = path.join(projectRoot, 'test.config');
@@ -92,13 +95,23 @@ async function apiFreezePost(apiBase, user, token, options = {}) {
   }
 }
 
+/** Child env without inspector so CLI does not wait for debugger and time out. */
+function childEnv(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  const opts = (env.NODE_OPTIONS || '').replace(/\s*--inspect[^\s]*/g, '').trim();
+  env.NODE_OPTIONS = opts || undefined;
+  if (env.NODE_OPTIONS === undefined) delete env.NODE_OPTIONS;
+  return env;
+}
+
 function runDsoul(args, options = {}) {
-  const { stdin = null, cwd = projectRoot } = options;
+  const { stdin = null, cwd = projectRoot, timeoutMs = CLI_TIMEOUT_MS } = options;
   return new Promise((resolve) => {
     const child = spawn('node', [binPath, ...args], {
       cwd,
       stdio: stdin != null ? ['pipe', 'pipe', 'pipe'] : 'inherit',
-      shell: false
+      shell: false,
+      env: childEnv(options.env)
     });
     let stdout = '';
     let stderr = '';
@@ -111,8 +124,8 @@ function runDsoul(args, options = {}) {
     };
     const timer = setTimeout(() => {
       try { child.kill(); } catch (_) {}
-      finish(1, stdout, stderr + '\nCLI timed out after ' + CLI_TIMEOUT_MS / 1000 + 's.');
-    }, CLI_TIMEOUT_MS);
+      finish(1, stdout, stderr + '\nCLI timed out after ' + timeoutMs / 1000 + 's.');
+    }, timeoutMs);
     if (stdin != null) {
       child.stdout.on('data', (d) => { stdout += d.toString(); });
       child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -129,15 +142,15 @@ function runDsoulCapture(args, options = {}) {
   return new Promise((resolve) => {
     const spawnOpts = {
       cwd: options.cwd || projectRoot,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: childEnv(options.env)
     };
-    if (options.env) spawnOpts.env = { ...process.env, ...options.env };
     const child = spawn('node', [binPath, ...args], spawnOpts);
     let stdout = '';
     let stderr = '';
     let settled = false;
     const isFreeze = args[0] === 'freeze' && args[1] && String(args[1]).toLowerCase().endsWith('.zip');
-    const timeoutMs = isFreeze ? FREEZE_CLI_TIMEOUT_MS : CLI_TIMEOUT_MS;
+    const timeoutMs = options.timeoutMs ?? (isFreeze ? FREEZE_CLI_TIMEOUT_MS : CLI_TIMEOUT_MS);
     const finish = (code, out, err) => {
       if (settled) return;
       settled = true;
@@ -227,6 +240,81 @@ async function main() {
     if (r.code !== 0) {
       printCliOutput(r);
       throw new Error(`config skills-folder failed (exit ${r.code})`);
+    }
+    printStepOutput(r.stdout);
+  });
+
+  step('blocklist: fetch fresh blocklist (dsoul update)', async () => {
+    printCmd(['update', '-g', '(refresh blocklist, DSOUL_DEBUG=1)']);
+    const r = await runDsoulCapture(['update', '-g'], { env: { DSOUL_DEBUG: '1' }, timeoutMs: CLI_UPDATE_INTERACTIVE_TIMEOUT_MS });
+    const out = (r.stdout + '\n' + r.stderr);
+    const match = out.match(/Blocklist\s*\(\s*(\d+)\s*CIDs?\s*\)/);
+    const count = match ? parseInt(match[1], 10) : null;
+    if (count !== null) {
+      console.log('  Blocklist refreshed:', count, 'CID(s)');
+    }
+    if (out.trim()) printStepOutput(out.trim());
+  });
+
+  step('blocklist: install blocked CID must fail', async () => {
+    printCmd(['install', BLOCKED_TEST_CID]);
+    const r = await runDsoulCapture(['install', BLOCKED_TEST_CID], { env: { DSOUL_DEBUG: '1' } });
+    if (r.code === 0) {
+      printCliOutput(r);
+      throw new Error('install of blocked CID should fail (exit 1)');
+    }
+    const out = (r.stdout + '\n' + r.stderr);
+    const blockedByList = /blocklist|Cannot install/i.test(out);
+    const notFound = /No skill found for CID/i.test(out);
+    if (!blockedByList && !notFound) {
+      printCliOutput(r);
+      throw new Error('Expected "blocklist"/"Cannot install" or "No skill found for CID" in output');
+    }
+    if (blockedByList) console.log('  (blocked by blocklist)');
+    else console.log('  (install failed: no skill found for CID)');
+    printStepOutput(r.stderr);
+  });
+
+  step('blocklist: warning when blocked CID in dsoul.json', async () => {
+    await fs.mkdir(skillsDir, { recursive: true });
+    const dsoulPath = path.join(skillsDir, 'dsoul.json');
+    await fs.writeFile(dsoulPath, JSON.stringify({ skills: [{ cid: BLOCKED_TEST_CID, shortname: null, num: null, src: null, hostname: null }] }, null, 2), 'utf-8');
+    printCmd(['update', '-g', '--no-delete-blocked']);
+    const r = await runDsoulCapture(['update', '-g', '--no-delete-blocked'], { cwd: testDir, env: { DSOUL_DEBUG: '1' }, timeoutMs: CLI_TIMEOUT_MS });
+    const stderr = r.stderr || '';
+    if (!stderr.includes('WARNING') || !stderr.includes(BLOCKED_TEST_CID)) {
+      printCliOutput(r);
+      throw new Error('Expected blocklist WARNING and blocked CID in stderr');
+    }
+    printStepOutput(r.stderr);
+  });
+
+  step('blocklist: update with --no-delete-blocked keeps blocked in dsoul.json', async () => {
+    const dsoulPath = path.join(skillsDir, 'dsoul.json');
+    await fs.writeFile(dsoulPath, JSON.stringify({ skills: [{ cid: BLOCKED_TEST_CID, shortname: null, num: null, src: null, hostname: null }] }, null, 2), 'utf-8');
+    printCmd(['update', '-g', '--no-delete-blocked']);
+    const r = await runDsoulCapture(['update', '-g', '--no-delete-blocked'], { cwd: testDir, env: { DSOUL_DEBUG: '1' }, timeoutMs: CLI_UPDATE_INTERACTIVE_TIMEOUT_MS });
+    const raw = await fs.readFile(dsoulPath, 'utf-8');
+    const data = JSON.parse(raw);
+    const cids = (data.skills || []).map((s) => s.cid).filter(Boolean);
+    if (!cids.includes(BLOCKED_TEST_CID)) {
+      printCliOutput(r);
+      throw new Error('After update --no-delete-blocked, dsoul.json should still contain blocked CID');
+    }
+    printStepOutput(r.stdout);
+  });
+
+  step('blocklist: update with --delete-blocked removes blocked from dsoul.json', async () => {
+    const dsoulPath = path.join(skillsDir, 'dsoul.json');
+    await fs.writeFile(dsoulPath, JSON.stringify({ skills: [{ cid: BLOCKED_TEST_CID, shortname: null, num: null, src: null, hostname: null }] }, null, 2), 'utf-8');
+    printCmd(['update', '-g', '--delete-blocked']);
+    const r = await runDsoulCapture(['update', '-g', '--delete-blocked'], { cwd: testDir, env: { DSOUL_DEBUG: '1' }, timeoutMs: CLI_UPDATE_INTERACTIVE_TIMEOUT_MS });
+    const raw = await fs.readFile(dsoulPath, 'utf-8');
+    const data = JSON.parse(raw);
+    const cids = (data.skills || []).map((s) => s.cid).filter(Boolean);
+    if (cids.includes(BLOCKED_TEST_CID)) {
+      printCliOutput(r);
+      throw new Error('After update --delete-blocked, dsoul.json should not contain blocked CID');
     }
     printStepOutput(r.stdout);
   });
