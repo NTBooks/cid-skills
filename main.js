@@ -395,6 +395,29 @@ async function clearWpCredentials() {
   }
 }
 
+/** Record a file metric (view, download, favorite) via POST /file/{id}/metrics. Requires stored credentials. Non-fatal. */
+async function recordFileMetric(fileId, type) {
+  if (fileId == null || !['view', 'download', 'favorite'].includes(type)) return;
+  const credentials = await loadWpCredentials();
+  if (!credentials) return;
+  try {
+    const base = await getDsoulProviderBase();
+    const url = `${base}/file/${encodeURIComponent(String(fileId))}/metrics`;
+    const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
+    const body = new URLSearchParams({ type }).toString();
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body
+    });
+  } catch (_) {
+    // best-effort; do not fail install or disambiguation
+  }
+}
+
 // Default IPFS gateways (used when none configured)
 const DEFAULT_IPFS_GATEWAYS = [
   'https://ipfs.io/ipfs/',
@@ -539,6 +562,10 @@ async function runCliInstall(cid, options = {}, installRef) {
         }
       }
     }
+    const { postId: metricsPostId } = resolvePostIdFromEntry(entry);
+    if (metricsPostId) {
+      recordFileMetric(metricsPostId, 'view').catch(() => {});
+    }
     const isBundle = !!(entry.is_skill_bundle ?? entry.is_bundle);
 
     const settings = await loadSettings();
@@ -617,8 +644,11 @@ async function runCliInstall(cid, options = {}, installRef) {
       return false;
     }
 
+    const { postId, postLink } = resolvePostIdFromEntry(entry);
+    if (postId) {
+      recordFileMetric(postId, 'download').catch(() => {});
+    }
     try {
-      const { postId, postLink } = resolvePostIdFromEntry(entry);
       const hostname = await getProviderHostname();
       await updateDsoulJson(skillsFolder, 'add', {
         cid,
@@ -1188,6 +1218,13 @@ async function runCliFiles(opts) {
       console.log(`  CID: ${cid}`);
       console.log(`  Date: ${date}  Shortnames: ${shortnames}`);
       console.log(`  Tags: ${tags}`);
+      if (f.stats && typeof f.stats === 'object') {
+        const s = f.stats;
+        const v = s.views != null ? s.views : '-';
+        const d = s.downloads != null ? s.downloads : '-';
+        const fav = s.favorites != null ? s.favorites : '-';
+        console.log(`  Stats: views ${v}, downloads ${d}, favorites ${fav}`);
+      }
       if (f.url) console.log(`  URL: ${f.url}`);
       console.log('');
     });

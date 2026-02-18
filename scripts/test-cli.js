@@ -180,6 +180,65 @@ function parseUpgradeAvailableCid(output) {
   return m ? m[1] : null;
 }
 
+/** GET search_by_cid for a CID. Returns { entries } or { error }. */
+async function apiSearchByCid(apiBase, cid) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  try {
+    const url = `${apiBase}/search_by_cid?cid=${encodeURIComponent(cid)}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    const text = await res.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (_) {}
+    if (!res.ok) return { error: text || res.statusText, status: res.status };
+    const entries = Array.isArray(data) ? data : (data && data.entries) ? data.entries : [];
+    return { entries };
+  } catch (err) {
+    clearTimeout(timeout);
+    return { error: err.message || String(err) };
+  }
+}
+
+/** Resolve file (post) ID from first search_by_cid entry. Returns number or null. */
+function getFileIdFromEntry(entry) {
+  if (!entry) return null;
+  const n = (v) => (v != null && Number.isInteger(v) && v > 0) ? v : null;
+  return n(entry.id) ?? n(entry.ID) ?? n(entry.post_id) ?? null;
+}
+
+/** POST file metrics (view/download/favorite). Returns { status, ok, data } with data.stats. */
+async function apiFileMetricsPost(apiBase, user, token, fileId, type) {
+  const authHeader = 'Basic ' + Buffer.from(user + ':' + token).toString('base64');
+  const body = new URLSearchParams({ type }).toString();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  try {
+    const url = `${apiBase}/file/${encodeURIComponent(String(fileId))}/metrics`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: authHeader
+      },
+      body,
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    const text = await res.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (_) {}
+    return { status: res.status, ok: res.ok, data };
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
+}
+
 function printCmd(args) {
   console.log('  $ dsoul', args.join(' '));
 }
@@ -613,16 +672,6 @@ async function main() {
     }
   });
 
-  step('unregister', async () => {
-    printCmd(['unregister']);
-    const r = await runDsoulCapture(['unregister']);
-    if (r.code !== 0) {
-      printCliOutput(r);
-      throw new Error(`unregister failed (exit ${r.code})`);
-    }
-    printStepOutput(r.stdout);
-  });
-
   step('install frozen zip (by CID)', async () => {
     if (!frozenZipCid) throw new Error('No frozen zip CID from earlier step');
     console.log('  waiting', INSTALL_WAIT_MS / 1000, 's for server to have CID...');
@@ -642,6 +691,42 @@ async function main() {
     const skillEntries = entries.filter((e) => e !== 'dsoul.json');
     console.log('  skills dir contents:', entries.join(', '));
     if (skillEntries.length === 0) throw new Error(`Skills folder missing expected skill: ${entries.join(', ')}`);
+  });
+
+  step('metrics: verify view and download recorded', async () => {
+    if (!apiBase || !user || !token || !frozenZipCid) {
+      console.log('  skip (need apiBase, user, token, frozenZipCid)');
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    const search = await apiSearchByCid(apiBase, frozenZipCid);
+    if (search.error || !search.entries || search.entries.length === 0) {
+      throw new Error(`search_by_cid for ${frozenZipCid} failed or empty: ${search.error || 'no entries'}`);
+    }
+    const fileId = getFileIdFromEntry(search.entries[0]);
+    if (!fileId) {
+      throw new Error(`search_by_cid entry has no id/ID/post_id: ${JSON.stringify(search.entries[0]).slice(0, 120)}`);
+    }
+    const res = await apiFileMetricsPost(apiBase, user, token, fileId, 'view');
+    if (!res.ok || !res.data || !res.data.success) {
+      throw new Error(`metrics POST failed: ${res.status} ${res.data ? JSON.stringify(res.data) : ''}`);
+    }
+    const stats = res.data.stats || {};
+    const views = typeof stats.views === 'number' ? stats.views : 0;
+    const downloads = typeof stats.downloads === 'number' ? stats.downloads : 0;
+    if (views < 1) throw new Error(`Expected stats.views >= 1 after install (disambiguation), got ${views}`);
+    if (downloads < 1) throw new Error(`Expected stats.downloads >= 1 after install, got ${downloads}`);
+    console.log('  ok – views:', views, 'downloads:', downloads);
+  });
+
+  step('unregister', async () => {
+    printCmd(['unregister']);
+    const r = await runDsoulCapture(['unregister']);
+    if (r.code !== 0) {
+      printCliOutput(r);
+      throw new Error(`unregister failed (exit ${r.code})`);
+    }
+    printStepOutput(r.stdout);
   });
 
   step('uninstall', async () => {
