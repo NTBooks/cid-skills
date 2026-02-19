@@ -1652,7 +1652,7 @@ app.whenReady().then(async () => {
   const hasCliArgs = app.isPackaged ? process.argv.length > 1 : process.argv.length > 2;
   if (hasCliArgs && !cliArgs) {
     printCliDisclaimer();
-    console.error('Invalid command.');
+    console.error('Invalid command. Run dsoul help for usage.');
     process.exit(1);
     return;
   }
@@ -1879,9 +1879,9 @@ ipcMain.handle('open-skills-folder', async () => {
   return { success: true };
 });
 
-/** Returns a file-safe folder name: trimmed, invalid path chars replaced with underscore, collapsed. */
+/** Returns a file-safe folder name: trimmed, invalid path chars replaced with underscore, collapsed. Uses zip root folder name when the bundle has a single folder containing skill.md. */
 function getFileSafeSkillName(fileData) {
-  let raw = (fileData.skillMetadata?.name || fileData.dsoulEntry?.name || fileData.cid || 'skill').trim();
+  let raw = (fileData.zipRootFolderName || fileData.skillMetadata?.name || fileData.dsoulEntry?.name || fileData.cid || 'skill').trim();
   raw = raw.replace(/\.zip$/i, '').trim() || raw;
   const safe = raw.replace(/[\s\\/:*?"<>|]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'skill';
   return safe;
@@ -1946,6 +1946,14 @@ async function doActivateFile(cid, options) {
       return { success: false, error: 'Skills folder not set. Please configure it in Options or set DSOUL_SKILLS_FOLDER.' };
     }
 
+    if ((fileData.is_skill_bundle || fileData.is_bundle) && !fileData.zipRootFolderName) {
+      const zipPathForInfo = path.join(dataDir, `${cid}.zip`);
+      try {
+        const info = await getZipBundleInfo(zipPathForInfo);
+        if (info.singleRootFolderName) fileData.zipRootFolderName = info.singleRootFolderName;
+      } catch (_) { /* non-fatal */ }
+    }
+
     const baseFolderResolved = path.resolve(baseFolder);
     const sameFolder = fileData.activatedFolderName && fileData.activatedSkillsFolder &&
       path.resolve(fileData.activatedSkillsFolder) === baseFolderResolved;
@@ -1971,14 +1979,36 @@ async function doActivateFile(cid, options) {
 
     if (fileData.is_skill_bundle || fileData.is_bundle) {
       const zipPath = path.join(dataDir, `${cid}.zip`);
+      let stripPrefix = fileData.zipRootFolderName || null;
+      if (!stripPrefix) {
+        const info = await getZipBundleInfo(zipPath);
+        stripPrefix = info.singleRootFolderName;
+        if (stripPrefix) fileData.zipRootFolderName = stripPrefix;
+      }
       await new Promise((resolve, reject) => {
         let resolved = false;
         yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
           if (err) return reject(err);
           zipfile.on('entry', (entry) => {
-            const baseLower = path.basename(entry.fileName).replace(/\/$/, '').toLowerCase();
-            const mainAsSkillMd = baseLower === 'skill.md' ? 'skill.md' : null;
-            extractEntryToFileNoOverwrite(zipfile, entry, skillDir, mainAsSkillMd).then(() => {
+            let entryPath = entry.fileName.replace(/\\/g, '/');
+            let destOverride = null;
+            if (stripPrefix) {
+              if (entryPath.startsWith(stripPrefix + '/')) {
+                destOverride = entryPath.slice(stripPrefix.length + 1);
+              } else if (entryPath === stripPrefix || entryPath === stripPrefix + '/') {
+                zipfile.readEntry();
+                return;
+              }
+            }
+            if (destOverride === '' || (destOverride != null && /\/$/.test(destOverride))) {
+              zipfile.readEntry();
+              return;
+            }
+            if (destOverride == null) {
+              const baseLower = path.basename(entry.fileName).replace(/\/$/, '').toLowerCase();
+              destOverride = baseLower === 'skill.md' ? 'skill.md' : null;
+            }
+            extractEntryToFileNoOverwrite(zipfile, entry, skillDir, destOverride).then(() => {
               zipfile.readEntry();
             }, (e) => {
               if (!resolved) { resolved = true; try { zipfile.close(); } catch (_) { } reject(e); }
@@ -2032,6 +2062,55 @@ ipcMain.handle('hash-file-from-path', async (event, cid) => {
     return { success: false, error: error.message };
   }
 });
+
+/** List all entry file names in a zip (normalized with forward slashes). */
+function listZipEntryNames(zipPath) {
+  return new Promise((resolve, reject) => {
+    const names = [];
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+      zipfile.on('entry', (entry) => {
+        names.push(entry.fileName.replace(/\\/g, '/'));
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => {
+        zipfile.close();
+        resolve(names);
+      });
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
+
+/** If the zip has a single root folder (all entries under one top-level dir), return that folder name; else null. */
+function getZipSingleRootFolderName(entryNames) {
+  const topLevel = new Set();
+  for (const n of entryNames) {
+    const idx = n.indexOf('/');
+    if (idx === -1) topLevel.add(n);
+    else topLevel.add(n.slice(0, idx));
+  }
+  const roots = [...topLevel];
+  if (roots.length !== 1) return null;
+  const root = roots[0];
+  const allUnderRoot = entryNames.every((n) => n === root || n.startsWith(root + '/'));
+  if (!allUnderRoot) return null;
+  const hasSubPath = entryNames.some((n) => n.includes('/'));
+  return hasSubPath ? root : null;
+}
+
+/** Get bundle info: has Skill.MD (anywhere), optional single root folder name, and skill content. */
+async function getZipBundleInfo(zipPath) {
+  const names = await listZipEntryNames(zipPath);
+  const singleRootFolderName = getZipSingleRootFolderName(names);
+  const skillContent = await readEntryFromZip(zipPath, 'Skill.MD');
+  return {
+    hasSkillMd: !!skillContent,
+    singleRootFolderName,
+    skillContent: skillContent || null
+  };
+}
 
 /** Find and read first zip entry whose basename matches entryFileName (case-insensitive). */
 function readEntryFromZip(zipPath, entryFileName) {
@@ -2111,14 +2190,19 @@ ipcMain.handle('get-bundle-skill-content', async (event, cid) => {
   }
 });
 
-/** Validate zip buffer: has Skill.MD (case-insensitive basename). Used when DSOUL has no entry so we detect skill bundles from IPFS directly. */
+/** Validate zip buffer: has Skill.MD (case-insensitive basename, at root or inside a single folder). Used when DSOUL has no entry so we detect skill bundles from IPFS directly. */
 ipcMain.handle('validate-zip-skill-bundle', async (event, buffer) => {
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   const tmpPath = path.join(os.tmpdir(), `dsoul-verify-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
   try {
     await fs.writeFile(tmpPath, buf);
-    const skillContent = await readEntryFromZip(tmpPath, 'Skill.MD');
-    return { success: true, valid: !!skillContent, skillContent: skillContent || null };
+    const info = await getZipBundleInfo(tmpPath);
+    return {
+      success: true,
+      valid: info.hasSkillMd,
+      skillContent: info.skillContent,
+      rootFolderName: info.singleRootFolderName || null
+    };
   } catch (error) {
     return { success: false, error: error.message };
   } finally {

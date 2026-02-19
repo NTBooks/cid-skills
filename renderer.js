@@ -471,6 +471,8 @@ function setupEventListeners() {
 let verifiedFileContent = null;
 /** True when verified content is a bundle (zip); content is ArrayBuffer. */
 let verifiedFileIsBundle = false;
+/** When the verified bundle is a zip with a single root folder containing Skill.MD, this is that folder name. */
+let verifiedZipRootFolderName = null;
 // Chosen DSOUL entry from disambiguation (used when saving file on Load or Reverify)
 let pendingDsoulEntry = null;
 
@@ -498,6 +500,7 @@ async function handleInstall() {
       cid,
       content: isBundle ? undefined : contentStr,
       is_skill_bundle: isBundle || undefined,
+      zipRootFolderName: isBundle && verifiedZipRootFolderName ? verifiedZipRootFolderName : undefined,
       tags: existing?.tags ?? [],
       active: existing?.active ?? false,
       skillMetadata: skillMetadata || null,
@@ -524,6 +527,7 @@ async function handleInstall() {
     currentLoadCid = null;
     verifiedFileContent = null;
     verifiedFileIsBundle = false;
+    verifiedZipRootFolderName = null;
     pendingDsoulEntry = null;
   } catch (error) {
     alert('Error installing file: ' + error.message);
@@ -686,6 +690,8 @@ async function handleLoad() {
   isLoading = true;
   currentLoadCid = cid;
   verifiedFileContent = null;
+  verifiedFileIsBundle = false;
+  verifiedZipRootFolderName = null;
   pendingDsoulEntry = null;
 
   // Hide install section if it was shown
@@ -740,6 +746,7 @@ function handleCancelLoad() {
   isLoading = false;
   verifiedFileContent = null;
   verifiedFileIsBundle = false;
+  verifiedZipRootFolderName = null;
   const loadBtn = document.getElementById('load-btn');
   loadBtn.disabled = false;
 }
@@ -839,6 +846,7 @@ async function loadAndVerifyFile(cid) {
     }
     isBundle = true;
     validatedBundleSkillContent = validateResult.skillContent || null;
+    verifiedZipRootFolderName = validateResult.rootFolderName || null;
   }
 
   const singleGateway = successfulDownloads.length === 1;
@@ -1590,6 +1598,7 @@ async function handleReverify() {
   currentLoadCid = cid;
   verifiedFileContent = null;
   verifiedFileIsBundle = false;
+  verifiedZipRootFolderName = null;
 
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');
