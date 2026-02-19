@@ -264,7 +264,7 @@ dsoul package ./path/to/my-skill
 **Freeze (stamp a file on DSOUL)**
 
 ```text
-dsoul freeze <file> [--shortname=NAME] [--tags=tag1,tag2] [--version=X.Y.Z] [--license_url=URL] [--ancillary_cid=CID]
+dsoul freeze <file> [--shortname=NAME] [--tags=tag1,tag2] [--version=X.Y.Z] [--license_url=URL]
 ```
 
 Sends the file to the configured DSOUL server’s **freeze** endpoint to be stamped and receive an IPFS CID. Uses the credentials stored by **`dsoul register`** (Basic Auth). Required: **filename** plus exactly one of **cl_file** (physical file) or **content** (raw text). Supports:
@@ -278,7 +278,6 @@ Optional:
 - **`--tags=tag1,tag2`** – Comma-separated tags (hashtags).
 - **`--version=X.Y.Z`** – Version (default: `1.0.0`). Highly recommended if using shortname.
 - **`--license_url=URL`** – URL to a license file.
-- **`--ancillary_cid=CID`** – CID or URL for additional resources.
 
 Examples:
 

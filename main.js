@@ -60,6 +60,7 @@ function getCliArgs() {
   if (cmd === 'register') return { command: 'register' };
   if (cmd === 'unregister') return { command: 'unregister' };
   if (cmd === 'help' || cmd === '-h' || cmd === '--help') return { command: 'help' };
+  if (cmd === '--version' || cmd === '-V') return { command: 'version' };
   if (cmd === 'update') {
     const rest = argv.slice(argIndex);
     const globalOnly = rest.includes('-g');
@@ -97,7 +98,6 @@ function getCliArgs() {
       else if (a.startsWith('--tags=')) opts.tags = a.slice(7).trim();
       else if (a.startsWith('--version=')) opts.version = a.slice(10).trim();
       else if (a.startsWith('--license_url=')) opts.license_url = a.slice(14).trim();
-      else if (a.startsWith('--ancillary_cid=')) opts.ancillary_cid = a.slice(16).trim();
     });
     return { command: 'freeze', ...opts };
   }
@@ -808,7 +808,6 @@ function getCliHelpText() {
     '  --tags=tag1,tag2   Comma-separated tags (or hashtags)',
     '  --version=X.Y.Z   Version (default: 1.0.0)',
     '  --license_url=URL   URL to a license file',
-    '  --ancillary_cid=CID CID or URL for additional resources',
     '',
     'Options for files:',
     '  --page=N       Page number (default: 1)',
@@ -1313,7 +1312,6 @@ async function runCliFreeze(opts) {
       if (opts.tags) form.append('tags', opts.tags);
       if (opts.shortname) form.append('shortname', opts.shortname.trim());
       if (opts.license_url) form.append('license_url', opts.license_url.trim());
-      if (opts.ancillary_cid) form.append('ancillary_cid', opts.ancillary_cid.trim());
       const formHeaders = form.getHeaders();
       const bodyBuffer = await new Promise((resolve, reject) => {
         const chunks = [];
@@ -1346,7 +1344,6 @@ async function runCliFreeze(opts) {
       if (opts.tags) params.append('tags', opts.tags);
       if (opts.shortname) params.append('shortname', opts.shortname.trim());
       if (opts.license_url) params.append('license_url', opts.license_url.trim());
-      if (opts.ancillary_cid) params.append('ancillary_cid', opts.ancillary_cid.trim());
       res = await fetch(freezeUrl, {
         method: 'POST',
         headers: {
@@ -1490,6 +1487,11 @@ app.whenReady().then(async () => {
     printCliDisclaimer();
     if (cliArgs.command === 'help') {
       console.log(getCliHelpText());
+      process.exit(0);
+      return;
+    }
+    if (cliArgs.command === 'version') {
+      console.log(app.getVersion());
       process.exit(0);
       return;
     }

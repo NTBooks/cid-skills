@@ -119,7 +119,6 @@ Freeze options:
 | `--tags=tag1,tag2` | Comma-separated tags |
 | `--version=X.Y.Z` | Version (default: 1.0.0) |
 | `--license_url=URL` | URL to a license file |
-| `--ancillary_cid=CID` | CID or URL for additional resources |
 
 ### balance
 
