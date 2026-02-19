@@ -1,6 +1,6 @@
 {
   "name": "diamond-soul-downloader",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Diamond Soul Downloader - Install AI Skills from IPFS",
   "main": "main.js",
   "bin": {
@@ -16,7 +16,8 @@
     "dist:linux": "electron-builder --linux && npm run cleanup:dist",
     "dist:linux:wsl": "wsl bash -l -c \"cd \\\"$(wslpath '%cd%')\\\" && npm run dist:linux\"",
     "cleanup:dist": "node scripts/cleanup-dist.js",
-    "test:cli": "node scripts/test-cli.js"
+    "test:cli": "node scripts/test-cli.js",
+    "prepdeploy": "node scripts/prepdeploy.js"
   },
   "keywords": [
     "ipfs",
