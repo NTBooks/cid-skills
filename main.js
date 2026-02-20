@@ -506,6 +506,122 @@ function parseSkillHeaderForCli(content) {
   return null;
 }
 
+/** Install a skill by CID when DSOUL has no entry (loose skill on IPFS). Downloads from gateways, verifies hash, detects single file vs zip bundle, then saves and activates. */
+async function runCliInstallDirectIpfs(cid, options = {}, installRef) {
+  try {
+    const settings = await loadSettings();
+    const gateways = Array.isArray(settings.ipfsGateways) && settings.ipfsGateways.length > 0
+      ? settings.ipfsGateways
+      : DEFAULT_IPFS_GATEWAYS;
+    const normalizedGateways = gateways.map((u) => {
+      const s = (u || '').trim();
+      return s.endsWith('/') ? s : s + '/';
+    });
+    let content = null;
+    for (const gateway of normalizedGateways) {
+      try {
+        const gatewayUrl = gateway + cid;
+        const response = await fetch(gatewayUrl);
+        if (!response.ok) continue;
+        const contentLength = response.headers.get('Content-Length');
+        if (contentLength && parseInt(contentLength, 10) > MAX_FILE_SIZE) continue;
+        const arrayBuffer = await response.arrayBuffer();
+        if (arrayBuffer.byteLength > MAX_FILE_SIZE) continue;
+        content = arrayBuffer;
+        break;
+      } catch (_) {
+        // try next gateway
+      }
+    }
+    if (!content) {
+      console.error('Failed to download from all IPFS gateways');
+      return false;
+    }
+    const buf = Buffer.from(content);
+    const hashResult = await Hash.of(buf);
+    if (hashResult !== cid) {
+      console.error(`Hash mismatch: expected ${cid}, got ${hashResult}`);
+      return false;
+    }
+    const isZip = buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B;
+    let isBundle = false;
+    let skillMetadata = null;
+    let zipRootFolderName = null;
+    if (isZip) {
+      const tmpPath = path.join(os.tmpdir(), `dsoul-install-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+      try {
+        await fs.writeFile(tmpPath, buf);
+        const info = await getZipBundleInfo(tmpPath);
+        if (!info.hasSkillMd) {
+          console.error('Downloaded file is a zip but does not contain Skill.MD');
+          return false;
+        }
+        isBundle = true;
+        zipRootFolderName = info.singleRootFolderName || undefined;
+        if (info.skillContent) skillMetadata = parseSkillHeaderForCli(info.skillContent);
+      } finally {
+        await fs.unlink(tmpPath).catch(() => { });
+      }
+    } else {
+      const contentStr = buf.toString('utf-8');
+      skillMetadata = parseSkillHeaderForCli(contentStr);
+    }
+    const existing = await readFileData(cid).catch(() => null);
+    const fileData = {
+      cid,
+      content: isBundle ? undefined : buf.toString('utf-8'),
+      is_skill_bundle: isBundle || undefined,
+      zipRootFolderName: zipRootFolderName || undefined,
+      tags: existing?.tags ?? [],
+      active: false,
+      skillMetadata: skillMetadata || null,
+      dsoulEntry: null,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      activatedFolderName: existing?.activatedFolderName,
+      activatedSkillsFolder: existing?.activatedSkillsFolder
+    };
+    const saveResult = await saveFileData(fileData, isBundle ? buf : undefined);
+    if (!saveResult.success) {
+      console.error('Save failed:', saveResult.error);
+      return false;
+    }
+    const skillsFolder = options.skillsFolder != null
+      ? options.skillsFolder
+      : (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '');
+    if (!skillsFolder) {
+      console.error('Skills folder not set. Use -g and set it in Options, or set DSOUL_SKILLS_FOLDER.');
+      return false;
+    }
+    if (options.skillsFolder != null) {
+      await fs.mkdir(skillsFolder, { recursive: true });
+    }
+    const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : undefined;
+    const activateResult = await doActivateFile(cid, activateOptions);
+    if (!activateResult.success) {
+      console.error('Activate failed:', activateResult.error);
+      return false;
+    }
+    try {
+      const hostname = await getProviderHostname();
+      await updateDsoulJson(skillsFolder, 'add', {
+        cid,
+        shortname: (installRef && installRef !== cid) ? installRef : null,
+        post_id: null,
+        post_link: null,
+        hostname: hostname || null
+      });
+    } catch (e) {
+      // non-fatal
+    }
+    const name = skillMetadata?.name || cid;
+    console.log(`Installed and activated: ${name} (${cid})`);
+    return true;
+  } catch (err) {
+    console.error('Install failed:', err.message || String(err));
+    return false;
+  }
+}
+
 async function runCliInstall(cid, options = {}, installRef) {
   try {
     const template = await getDsoulUrlTemplate();
@@ -525,8 +641,7 @@ async function runCliInstall(cid, options = {}, installRef) {
     }
     const entries = Array.isArray(data) ? data : [];
     if (entries.length === 0) {
-      console.error(`No skill found for CID: ${cid}`);
-      return false;
+      return await runCliInstallDirectIpfs(cid, options, installRef);
     }
     let entry;
     if (entries.length === 1) {
