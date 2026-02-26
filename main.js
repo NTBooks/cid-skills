@@ -9,6 +9,7 @@ const archiver = require('archiver');
 const FormData = require('form-data');
 const Hash = require('ipfs-only-hash');
 const yauzl = require('yauzl');
+const diff = require('diff');
 
 const defaultDsoulProviderOrigin = 'https://dsoul.org';
 const DSOUL_API_PATH = '/wp-json/diamond-soul/v1';
@@ -33,8 +34,11 @@ function getCliArgs() {
     const global = rest.includes('-g');
     const yes = rest.includes('-y');
     const target = rest.find((a) => a !== '-g' && a !== '-y' && !a.startsWith('-'));
-    if (!target || !String(target).trim()) return null;
-    return { command: 'install', target: String(target).trim(), global, yes };
+    if (target && String(target).trim()) {
+      return { command: 'install', target: String(target).trim(), global, yes };
+    }
+    // No cid or shortname: install from dsoul.json list (local only)
+    return { command: 'install', fromList: true, global, yes };
   }
   if (cmd === 'config') {
     const key = argv[argIndex];
@@ -160,6 +164,25 @@ async function getDsoulProviderBase() {
   return origin + DSOUL_API_PATH;
 }
 
+/** Build provider base URL from hostname (e.g. dsoul.org) or full URL. Returns origin + DSOUL_API_PATH. */
+function buildProviderBaseFromHostOrUrl(hostOrUrl) {
+  const s = (hostOrUrl || '').trim();
+  if (!s) return null;
+  let origin;
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    try {
+      const u = new URL(s);
+      origin = u.origin;
+    } catch (_) {
+      origin = 'https://' + s.replace(/^\/+|\/+$/g, '');
+    }
+  } else {
+    origin = 'https://' + s.replace(/^\/+|\/+$/g, '');
+  }
+  if (origin.endsWith(DSOUL_API_PATH)) return origin;
+  return origin + DSOUL_API_PATH;
+}
+
 /** Get the hostname of the configured DSOUL provider (e.g. dsoul.org, donotreplace.com). */
 async function getProviderHostname() {
   try {
@@ -171,17 +194,36 @@ async function getProviderHostname() {
   }
 }
 
+/** Get hostname from a provider base URL or host string. */
+function getHostnameFromProviderBase(providerBase) {
+  if (providerBase == null || !String(providerBase).trim()) return null;
+  const base = buildProviderBaseFromHostOrUrl(providerBase);
+  if (!base) return null;
+  try {
+    const u = new URL(base);
+    return u.hostname || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /** URL template for CID lookup: base + /search_by_cid?cid={CID}.
  *  Server should return an array of entries; each entry must include the WordPress post ID
- *  so we can store it and call GET /file/{post_id}/graph for updates. Use id, ID, or post_id (number). */
-async function getDsoulUrlTemplate() {
-  const base = await getDsoulProviderBase();
+ *  so we can store it and call GET /file/{post_id}/graph for updates. Use id, ID, or post_id (number).
+ *  If providerBaseOverride is set, use it instead of settings. */
+async function getDsoulUrlTemplate(providerBaseOverride) {
+  const base = providerBaseOverride != null && String(providerBaseOverride).trim()
+    ? buildProviderBaseFromHostOrUrl(providerBaseOverride) || await getDsoulProviderBase()
+    : await getDsoulProviderBase();
   return `${base}/search_by_cid?cid={CID}`;
 }
 
-/** Resolve shortname (e.g. user@project:v1) to CID via DSOUL provider. GET base/resolve_shortname?shortname={NAME}. */
-async function resolveShortname(shortname) {
-  const base = await getDsoulProviderBase();
+/** Resolve shortname (e.g. user@project:v1) to CID via DSOUL provider. GET base/resolve_shortname?shortname={NAME}.
+ *  If providerBaseOverride is set, use it instead of settings. */
+async function resolveShortname(shortname, providerBaseOverride) {
+  const base = providerBaseOverride != null && String(providerBaseOverride).trim()
+    ? (buildProviderBaseFromHostOrUrl(providerBaseOverride) || await getDsoulProviderBase())
+    : await getDsoulProviderBase();
   const url = `${base}/resolve_shortname?shortname=${encodeURIComponent(shortname)}`;
   try {
     const res = await fetch(url);
@@ -429,6 +471,33 @@ const DEFAULT_IPFS_GATEWAYS = [
 ];
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
+/** Download content by CID from configured gateways. Returns { buffer } or { error }. */
+async function fetchZipByCid(cid) {
+  const settings = await loadSettings();
+  const gateways = Array.isArray(settings.ipfsGateways) && settings.ipfsGateways.length > 0
+    ? settings.ipfsGateways
+    : DEFAULT_IPFS_GATEWAYS;
+  const normalizedGateways = gateways.map((u) => {
+    const s = (u || '').trim();
+    return s.endsWith('/') ? s : s + '/';
+  });
+  for (const gateway of normalizedGateways) {
+    try {
+      const gatewayUrl = gateway + cid;
+      const response = await fetch(gatewayUrl);
+      if (!response.ok) continue;
+      const contentLength = response.headers.get('Content-Length');
+      if (contentLength && parseInt(contentLength, 10) > MAX_FILE_SIZE) continue;
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength > MAX_FILE_SIZE) continue;
+      return { buffer: Buffer.from(arrayBuffer) };
+    } catch (_) {
+      // try next gateway
+    }
+  }
+  return { error: 'Failed to download from all IPFS gateways' };
+}
+
 /** Get sortable timestamp from DSOUL entry for "oldest" ordering. Uses date, date_gmt, modified, post_date. */
 function getEntryDateMs(entry) {
   const raw = entry?.date || entry?.date_gmt || entry?.modified || entry?.post_date;
@@ -622,9 +691,28 @@ async function runCliInstallDirectIpfs(cid, options = {}, installRef) {
   }
 }
 
+/** Pick one entry from multiple by postId or postLink when provided. Returns entry or undefined. */
+function pickEntryByPostIdOrLink(entries, postId, postLink) {
+  if (!entries || entries.length === 0) return undefined;
+  if (entries.length === 1) return entries[0];
+  const wantId = postId != null && Number.isInteger(postId) ? postId : null;
+  const wantLink = (postLink != null && String(postLink).trim()) ? String(postLink).trim() : null;
+  for (const e of entries) {
+    if (wantId != null) {
+      const { postId: entryId } = resolvePostIdFromEntry(e);
+      if (entryId === wantId) return e;
+    }
+    if (wantLink) {
+      const link = getPostLinkFromEntry(e);
+      if (link && (link === wantLink || link.replace(/\/+$/, '') === wantLink.replace(/\/+$/, ''))) return e;
+    }
+  }
+  return undefined;
+}
+
 async function runCliInstall(cid, options = {}, installRef) {
   try {
-    const template = await getDsoulUrlTemplate();
+    const template = await getDsoulUrlTemplate(options.providerBase);
     const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
     const res = await fetch(url);
     const text = await res.text();
@@ -644,7 +732,10 @@ async function runCliInstall(cid, options = {}, installRef) {
       return await runCliInstallDirectIpfs(cid, options, installRef);
     }
     let entry;
-    if (entries.length === 1) {
+    const disambiguated = pickEntryByPostIdOrLink(entries, options.postId, options.postLink);
+    if (disambiguated) {
+      entry = disambiguated;
+    } else if (entries.length === 1) {
       entry = entries[0];
     } else if (options.autoPickOldest) {
       const sorted = [...entries].sort((a, b) => getEntryDateMs(a) - getEntryDateMs(b));
@@ -766,7 +857,9 @@ async function runCliInstall(cid, options = {}, installRef) {
       recordFileMetric(postId, 'download').catch(() => { });
     }
     try {
-      const hostname = await getProviderHostname();
+      const hostname = options.providerBase
+        ? getHostnameFromProviderBase(options.providerBase)
+        : await getProviderHostname();
       await updateDsoulJson(skillsFolder, 'add', {
         cid,
         shortname: (installRef && installRef !== cid) ? installRef : null,
@@ -785,6 +878,72 @@ async function runCliInstall(cid, options = {}, installRef) {
     console.error('Install failed:', err.message || String(err));
     return false;
   }
+}
+
+/** Install all items from a dsoul.json in the given skills folder. Uses each entry's hostname/url for provider and post_id/post_link for disambiguation. Does not delete any files. */
+async function runCliInstallFromList(skillsFolder, options = {}) {
+  const filepath = getDsoulJsonPath(skillsFolder);
+  let data;
+  try {
+    const content = await fs.readFile(filepath, 'utf-8');
+    data = JSON.parse(content);
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      console.error(`dsoul.json not found at ${filepath}. Create one or run install with a cid or shortname.`);
+      return false;
+    }
+    console.error(`Failed to read dsoul.json: ${e.message || String(e)}`);
+    return false;
+  }
+  const skills = Array.isArray(data.skills) ? data.skills : [];
+  if (skills.length === 0) {
+    console.log('No skills listed in dsoul.json.');
+    return true;
+  }
+  let okCount = 0;
+  let failCount = 0;
+  for (const skill of skills) {
+    const cid = (skill.cid && String(skill.cid).trim()) ? String(skill.cid).trim() : null;
+    const shortname = (skill.shortname && String(skill.shortname).trim()) ? String(skill.shortname).trim() : null;
+    const postId = skill.num != null ? (Number(skill.num) || null) : (skill.post_id != null ? (Number(skill.post_id) || null) : null);
+    const postLink = (skill.src && String(skill.src).trim()) ? String(skill.src).trim() : (skill.post_link && String(skill.post_link).trim()) ? String(skill.post_link).trim() : null;
+    const hostOrUrl = (skill.hostname && String(skill.hostname).trim()) ? String(skill.hostname).trim() : (postLink ? postLink : null);
+    const providerBase = hostOrUrl ? hostOrUrl : null;
+
+    let resolvedCid = parseCID(cid);
+    let installRef = shortname || cid;
+    if (!resolvedCid && shortname) {
+      const resolved = await resolveShortname(shortname, providerBase);
+      if (!resolved.success) {
+        console.error(`Skip ${shortname || cid}: ${resolved.error}`);
+        failCount++;
+        continue;
+      }
+      resolvedCid = resolved.cid;
+    }
+    if (!resolvedCid) {
+      console.error(`Skip: entry has no valid cid or shortname (cid=${cid}, shortname=${shortname}).`);
+      failCount++;
+      continue;
+    }
+    if (options.blocklist && options.blocklist.has(resolvedCid)) {
+      console.error(`Skip ${resolvedCid}: CID is on the blocklist.`);
+      failCount++;
+      continue;
+    }
+    const installOptions = {
+      skillsFolder,
+      providerBase: providerBase || undefined,
+      postId: postId || undefined,
+      postLink: postLink || undefined,
+      autoPickOldest: options.autoPickOldest === true
+    };
+    const ok = await runCliInstall(resolvedCid, installOptions, installRef);
+    if (ok) okCount++;
+    else failCount++;
+  }
+  console.log(`List install done: ${okCount} installed/updated, ${failCount} failed.`);
+  return failCount === 0;
 }
 
 const PACKAGE_REQUIRED_FILES = ['license.txt', 'skill.md'];
@@ -894,7 +1053,7 @@ function getCliHelpText() {
     '',
     'Commands:',
     '  config [<key> [value]]     Set or view dsoul-provider, skills-folder, skills-folder-name',
-    '  install [-g] [-y] <cid-or-shortname>   Install a skill by CID or shortname',
+    '  install [-g] [-y] [<cid-or-shortname>]  Install by CID/shortname, or from local dsoul.json if no arg',
     '  uninstall <cid-or-shortname>           Uninstall a skill (CID or shortname)',
     '  update [-g] [--local] [--delete-blocked|--no-delete-blocked]  Check for upgrades; if blocked CIDs found, optionally delete them',
     '  upgrade [-g] [--local]                Upgrade skills to latest (uninstall old, install latest)',
@@ -909,8 +1068,12 @@ function getCliHelpText() {
     '  help                      Show this help',
     '',
     'Options for install:',
-    '  -g    Install to configured global skills folder',
+    '  -g    Install to configured global skills folder (not allowed for list install)',
     '  -y    Auto-pick oldest entry when multiple DSOUL entries exist',
+    '',
+    'List install: run "dsoul install" with no cid or shortname to install/update all entries',
+    '  from dsoul.json in the local skills folder. Uses each entry\'s hostname/url for provider',
+    '  and num/post_id or src/post_link to disambiguate. Does not delete files.',
     '',
     'Options for update / upgrade:',
     '  -g        Global skills folder only',
@@ -1704,6 +1867,18 @@ app.whenReady().then(async () => {
   }
   if (cliArgs && cliArgs.command === 'install') {
     await ensureDataDir();
+    if (cliArgs.fromList) {
+      if (cliArgs.global) {
+        console.error('Global list installs are not available.');
+        process.exit(1);
+        return;
+      }
+      const installBase = (await loadSettings()).skillsFolderName || 'Skills';
+      const skillsFolder = path.join(process.cwd(), installBase);
+      const ok = await runCliInstallFromList(skillsFolder, { autoPickOldest: cliArgs.yes, blocklist });
+      process.exit(ok ? 0 : 1);
+      return;
+    }
     let cid = parseCID(cliArgs.target);
     let shortnameData = null;
     if (!cid) {
@@ -2168,6 +2343,14 @@ ipcMain.handle('activate-file', async (event, cid) => {
 
 ipcMain.handle('hash-file-from-path', async (event, cid) => {
   try {
+    const fileData = await readFileData(cid).catch(() => null);
+    const isBundle = fileData && (fileData.is_skill_bundle || fileData.is_bundle);
+    if (!isBundle) {
+      const zipPath = path.join(dataDir, `${cid}.zip`);
+      const buf = await fs.readFile(zipPath);
+      const hash = await Hash.of(buf);
+      return { success: true, hash };
+    }
     const zipPath = path.join(dataDir, `${cid}.zip`);
     const buf = await fs.readFile(zipPath);
     const hash = await Hash.of(buf);
@@ -2175,6 +2358,103 @@ ipcMain.handle('hash-file-from-path', async (event, cid) => {
   } catch (error) {
     console.error('Error hashing file from path:', error);
     return { success: false, error: error.message };
+  }
+});
+
+/** Verify bundle integrity: download zip by CID, compare each file to local copy (ignore user-added files). Returns report and diff output. */
+ipcMain.handle('verify-bundle-integrity', async (event, cid) => {
+  const consoleLines = [];
+  const log = (msg) => {
+    const line = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    console.log(line);
+    consoleLines.push(line);
+  };
+  try {
+    const fileData = await readFileData(cid).catch(() => null);
+    if (!fileData || (!fileData.is_skill_bundle && !fileData.is_bundle)) {
+      return { success: false, error: 'Not a bundle or file not found' };
+    }
+    const settings = await loadSettings();
+    const baseFolder = fileData.activatedSkillsFolder || settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
+    if (!fileData.activatedFolderName || !baseFolder) {
+      return { success: false, error: 'Bundle has no activated folder to verify' };
+    }
+    const skillDir = path.join(baseFolder, fileData.activatedFolderName);
+
+    const downloadResult = await fetchZipByCid(cid);
+    if (downloadResult.error) {
+      return { success: false, error: downloadResult.error };
+    }
+    const zipBuffer = downloadResult.buffer;
+    const zipHash = await Hash.of(zipBuffer);
+    if (zipHash !== cid) {
+      return { success: false, error: `Downloaded zip hash ${zipHash} does not match CID ${cid}` };
+    }
+
+    const tmpZipPath = path.join(os.tmpdir(), `dsoul-verify-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+    try {
+      await fs.writeFile(tmpZipPath, zipBuffer);
+      const entryNames = await listZipEntryNames(tmpZipPath);
+      const stripPrefix = fileData.zipRootFolderName || getZipSingleRootFolderName(entryNames) || null;
+      const zipEntries = await readAllZipFileEntries(tmpZipPath);
+
+      const matched = [];
+      const mismatched = [];
+      const missing = [];
+      const diffs = [];
+
+      for (const { fileName, buffer: zipBuf } of zipEntries) {
+        const localPath = mapZipEntryToLocalPath(fileName, stripPrefix, skillDir);
+        if (localPath == null) continue;
+        let localBuf;
+        try {
+          localBuf = await fs.readFile(localPath);
+        } catch (e) {
+          if (e.code === 'ENOENT') {
+            missing.push(fileName);
+            log(`Missing (in zip, not on disk): ${fileName}`);
+            continue;
+          }
+          throw e;
+        }
+        const zipHashEntry = await Hash.of(zipBuf);
+        const localHashEntry = await Hash.of(localBuf);
+        if (zipHashEntry === localHashEntry) {
+          matched.push(fileName);
+        } else {
+          mismatched.push(fileName);
+          let diffText = null;
+          if (isLikelyText(zipBuf) && isLikelyText(localBuf)) {
+            const zipStr = zipBuf.toString('utf-8');
+            const localStr = localBuf.toString('utf-8');
+            diffText = diff.createTwoFilesPatch(fileName, fileName, zipStr, localStr, 'original', 'working copy');
+            log(`--- ${fileName} (diff: original vs working copy) ---`);
+            log(diffText);
+            log('');
+          } else {
+            log(`Mismatch (binary): ${fileName}`);
+          }
+          diffs.push({ fileName, diff: diffText });
+        }
+      }
+
+      const allMatch = mismatched.length === 0 && missing.length === 0;
+      const summary = `Bundle integrity: ${matched.length} matched, ${mismatched.length} mismatched, ${missing.length} missing`;
+      log(summary);
+
+      return {
+        success: true,
+        cidMatchesZip: true,
+        report: { matched, mismatched, missing, allMatch },
+        diffs,
+        consoleOutput: consoleLines.join('\n')
+      };
+    } finally {
+      await fs.unlink(tmpZipPath).catch(() => {});
+    }
+  } catch (error) {
+    console.error('Verify bundle integrity error:', error);
+    return { success: false, error: error.message || String(error) };
   }
 });
 
@@ -2196,6 +2476,71 @@ function listZipEntryNames(zipPath) {
       zipfile.readEntry();
     });
   });
+}
+
+/** Read all file entries (no directories) from a zip; returns [{ fileName, buffer }]. */
+function readAllZipFileEntries(zipPath) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+      const next = () => {
+        zipfile.readEntry();
+      };
+      zipfile.on('entry', (entry) => {
+        const fileName = entry.fileName.replace(/\\/g, '/');
+        if (/\/$/.test(fileName)) {
+          next();
+          return;
+        }
+        zipfile.openReadStream(entry, (readErr, readStream) => {
+          if (readErr) {
+            zipfile.close();
+            return reject(readErr);
+          }
+          const chunks = [];
+          readStream.on('data', (chunk) => chunks.push(chunk));
+          readStream.on('end', () => {
+            entries.push({ fileName, buffer: Buffer.concat(chunks) });
+            next();
+          });
+          readStream.on('error', (e) => {
+            zipfile.close();
+            reject(e);
+          });
+        });
+      });
+      zipfile.on('end', () => {
+        zipfile.close();
+        resolve(entries);
+      });
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
+
+/** Map zip entry path to local path; stripPrefix is the single root folder name if zip has one. Returns null for directory-only. */
+function mapZipEntryToLocalPath(entryPath, stripPrefix, skillDir) {
+  let localRelative = entryPath;
+  if (stripPrefix) {
+    if (entryPath === stripPrefix || entryPath === stripPrefix + '/') return null;
+    if (entryPath.startsWith(stripPrefix + '/')) {
+      localRelative = entryPath.slice(stripPrefix.length + 1);
+    }
+  }
+  if (!localRelative || /\/$/.test(localRelative)) return null;
+  return path.join(skillDir, localRelative);
+}
+
+/** Heuristic: true if buffer looks like text (no null bytes in first 8k). */
+function isLikelyText(buffer) {
+  if (!buffer || buffer.length === 0) return true;
+  const len = Math.min(buffer.length, 8192);
+  for (let i = 0; i < len; i++) {
+    if (buffer[i] === 0) return false;
+  }
+  return true;
 }
 
 /** If the zip has a single root folder (all entries under one top-level dir), return that folder name; else null. */

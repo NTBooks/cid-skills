@@ -1562,14 +1562,61 @@ async function updateCidDisplay(cid) {
   
   if (!file) return;
 
+  const isBundle = file.is_skill_bundle ?? file.is_bundle;
   try {
-    const hashResult = (file.is_skill_bundle ?? file.is_bundle)
-      ? await window.electronAPI.hashFileFromPath(cid)
-      : await window.electronAPI.calculateHash(file.content);
+    if (isBundle) {
+      const result = await window.electronAPI.verifyBundleIntegrity(cid);
+      if (!result.success) {
+        if (result.error && result.error.includes('no activated folder')) {
+          const hashResult = await window.electronAPI.hashFileFromPath(cid);
+          if (hashResult.success) {
+            const matches = hashResult.hash === cid;
+            cidDisplay.innerHTML = `
+              <div class="cid-display-label">Bundle not activated; stored zip CID:</div>
+              <div class="cid-display-value" style="color: ${matches ? '#4ec9b0' : '#f48771'}">${hashResult.hash} ${matches ? '✓' : '✗'}</div>
+            `;
+            return;
+          }
+        }
+        throw new Error(result.error);
+      }
+      const { report, diffs, consoleOutput } = result;
+      const { matched, mismatched, missing, allMatch } = report;
+      const statusColor = allMatch ? '#4ec9b0' : '#f48771';
+      const statusText = allMatch
+        ? `Bundle integrity: ✓ (${matched.length} files match)`
+        : `Bundle integrity: ${matched.length} matched, ${mismatched.length} mismatched, ${missing.length} missing`;
+      let html = `
+        <div class="cid-display-label">Bundle integrity (vs CID on IPFS):</div>
+        <div class="cid-display-value" style="color: ${statusColor}">${statusText}</div>
+      `;
+      if (mismatched.length > 0) {
+        html += `<div class="cid-display-label" style="margin-top: 8px;">Mismatched files:</div><ul style="margin: 4px 0; padding-left: 20px;">`;
+        mismatched.forEach((f) => { html += `<li>${escapeHtml(f)}</li>`; });
+        html += `</ul>`;
+      }
+      if (missing.length > 0) {
+        html += `<div class="cid-display-label" style="margin-top: 8px;">Missing (in zip, not on disk):</div><ul style="margin: 4px 0; padding-left: 20px;">`;
+        missing.forEach((f) => { html += `<li>${escapeHtml(f)}</li>`; });
+        html += `</ul>`;
+      }
+      if (diffs && diffs.length > 0) {
+        html += `<div class="cid-display-label" style="margin-top: 8px;">Diffs (original vs working copy):</div>`;
+        diffs.forEach(({ fileName, diff: diffText }) => {
+          if (diffText) {
+            html += `<details style="margin-top: 4px;"><summary>${escapeHtml(fileName)}</summary><pre class="bundle-diff-pre" style="font-size: 11px; max-height: 200px; overflow: auto; white-space: pre-wrap; margin: 4px 0;">${escapeHtml(diffText)}</pre></details>`;
+          }
+        });
+        html += `<div class="cid-display-label" style="margin-top: 6px; font-size: 11px; color: #888;">Full diff also in DevTools console.</div>`;
+      }
+      cidDisplay.innerHTML = html;
+      return;
+    }
+
+    const hashResult = await window.electronAPI.calculateHash(file.content);
     if (!hashResult.success) {
       throw new Error(hashResult.error);
     }
-    
     const calculatedHash = hashResult.hash;
     const matches = calculatedHash === cid;
 

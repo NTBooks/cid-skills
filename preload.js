@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFiles: () => ipcRenderer.invoke('get-files'),
   saveFile: (fileData, zipBuffer) => ipcRenderer.invoke('save-file', fileData, zipBuffer),
   hashFileFromPath: (cid) => ipcRenderer.invoke('hash-file-from-path', cid),
+  verifyBundleIntegrity: (cid) => ipcRenderer.invoke('verify-bundle-integrity', cid),
   getBundleSkillContent: (cid) => ipcRenderer.invoke('get-bundle-skill-content', cid),
   getBundleLicenseContent: (cid) => ipcRenderer.invoke('get-bundle-license-content', cid),
   deleteFile: (cid) => ipcRenderer.invoke('delete-file', cid),
