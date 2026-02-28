@@ -41,6 +41,9 @@
       "icon.png",
       "Skills/clverify-2025-02-09-1/clverify/**"
     ],
+    "asar": true,
+    "asarUnpack": [],
+    "electronLanguages": ["en-US"],
     "win": {
       "target": [
         "nsis",

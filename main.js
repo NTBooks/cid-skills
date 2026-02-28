@@ -1780,22 +1780,19 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      devTools: true // Enable DevTools
+      devTools: !app.isPackaged
     }
   });
 
-  // Remove menu bar completely
   mainWindow.setMenuBarVisibility(false);
 
-  // Open DevTools (you can comment this out if you don't want it to open automatically)
-  // mainWindow.webContents.openDevTools();
-
-  // Add keyboard shortcut to toggle DevTools (F12 or Ctrl+Shift+I)
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
-      mainWindow.webContents.toggleDevTools();
-    }
-  });
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        mainWindow.webContents.toggleDevTools();
+      }
+    });
+  }
 
   mainWindow.loadFile('index.html');
 }
