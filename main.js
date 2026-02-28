@@ -61,7 +61,15 @@ function getCliArgs() {
     if (!folder) return null;
     return { command: 'package', folder };
   }
-  if (cmd === 'register') return { command: 'register' };
+  if (cmd === 'register') {
+    const rest = argv.slice(argIndex);
+    if (rest[0] === '-i') return { command: 'register', statusOnly: true };
+    const u = rest[0]; const t = rest[1];
+    if (u && t && !String(u).startsWith('-') && !String(t).startsWith('-')) {
+      return { command: 'register', username: String(u).trim(), token: String(t).trim() };
+    }
+    return { command: 'register' };
+  }
   if (cmd === 'unregister') return { command: 'unregister' };
   if (cmd === 'help' || cmd === '-h' || cmd === '--help') return { command: 'help' };
   if (cmd === '--version' || cmd === '-V') return { command: 'version' };
@@ -225,6 +233,7 @@ async function resolveShortname(shortname, providerBaseOverride) {
     ? (buildProviderBaseFromHostOrUrl(providerBaseOverride) || await getDsoulProviderBase())
     : await getDsoulProviderBase();
   const url = `${base}/resolve_shortname?shortname=${encodeURIComponent(shortname)}`;
+  console.error('Calling DSoul API:', url);
   try {
     const res = await fetch(url);
     const text = await res.text();
@@ -263,6 +272,7 @@ async function fetchBlocklistFromApi() {
   try {
     const base = await getDsoulProviderBase();
     const url = `${base}/blocklist`;
+    console.error('Calling DSoul API:', url);
     if (process.env.DSOUL_DEBUG) {
       process.stderr.write(`Blocklist API URL: ${url}\n`);
     }
@@ -447,6 +457,7 @@ async function recordFileMetric(fileId, type) {
   try {
     const base = await getDsoulProviderBase();
     const url = `${base}/file/${encodeURIComponent(String(fileId))}/metrics`;
+    console.error('Calling DSoul API:', url);
     const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
     const body = new URLSearchParams({ type }).toString();
     await fetch(url, {
@@ -481,6 +492,9 @@ async function fetchZipByCid(cid) {
     const s = (u || '').trim();
     return s.endsWith('/') ? s : s + '/';
   });
+  if (normalizedGateways.length > 0) {
+    console.error('Trying IPFS gateways:', normalizedGateways.join(', '));
+  }
   for (const gateway of normalizedGateways) {
     try {
       const gatewayUrl = gateway + cid;
@@ -586,6 +600,12 @@ async function runCliInstallDirectIpfs(cid, options = {}, installRef) {
       const s = (u || '').trim();
       return s.endsWith('/') ? s : s + '/';
     });
+    if (normalizedGateways.length > 0) {
+      console.error('Trying IPFS gateways:', normalizedGateways.join(', '));
+    }
+    if (normalizedGateways.length > 0) {
+      console.error('Trying IPFS gateways:', normalizedGateways.join(', '));
+    }
     let content = null;
     for (const gateway of normalizedGateways) {
       try {
@@ -714,6 +734,7 @@ async function runCliInstall(cid, options = {}, installRef) {
   try {
     const template = await getDsoulUrlTemplate(options.providerBase);
     const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
+    console.error('Calling DSoul API:', url);
     const res = await fetch(url);
     const text = await res.text();
     if (!res.ok) {
@@ -1063,7 +1084,7 @@ function getCliHelpText() {
     '  freeze <file> [opts]      Stamp a file (zip/js/css/md/txt) via DSOUL freeze API',
     '  balance                   Check stamp/credit balance (uses stored credentials)',
     '  files [opts]              List your frozen files (uses stored credentials)',
-    '  register                  Store WordPress username and application key (secure)',
+    '  register [-i] [user] [token]  Store WordPress username and application key (secure); -i = check status only; optional user/token for non-interactive',
     '  unregister                Clear stored WordPress credentials',
     '  help                      Show this help',
     '',
@@ -1100,6 +1121,7 @@ async function fetchUpgradeGraph(postIdOrLink) {
   const base = await getDsoulProviderBase();
   const url = `${base}/file/${encodeURIComponent(String(postIdOrLink))}/graph`;
   try {
+    console.error('Calling DSoul API:', url);
     const res = await fetch(url);
     const text = await res.text();
     if (!res.ok) {
@@ -1338,18 +1360,28 @@ async function runCliUpgrade(cliArgs, blocklist) {
   return !hadError;
 }
 
-async function runCliRegister() {
+async function runCliRegister(cliArgs) {
   try {
     if (!safeStorage.isEncryptionAvailable()) {
       console.error('Register failed: secure storage is not available on this system.');
       return false;
     }
-    let username = (process.env.DSOUL_USER || '').trim();
-    let applicationKey = (process.env.DSOUL_TOKEN || process.env.DSOUL_APPLICATION_KEY || '').trim();
+    if (cliArgs && cliArgs.statusOnly) {
+      const existing = await loadWpCredentials();
+      if (existing) {
+        console.log('Registered as', existing.username + '.');
+      } else {
+        console.log('No username registered.');
+      }
+      return true;
+    }
+    let username = (cliArgs && cliArgs.username) || (process.env.DSOUL_USER || '').trim();
+    let applicationKey = (cliArgs && cliArgs.token) || (process.env.DSOUL_TOKEN || process.env.DSOUL_APPLICATION_KEY || '').trim();
     if (!username || !applicationKey) {
       if (!process.stdin.isTTY) {
         console.error('Register failed: no interactive terminal (Electron may not have stdin).');
-        console.error('Set DSOUL_USER and DSOUL_TOKEN (or DSOUL_APPLICATION_KEY) and run again.');
+        console.error('Provide username and token: dsoul register <username> <token>');
+        console.error('Or set DSOUL_USER and DSOUL_TOKEN (or DSOUL_APPLICATION_KEY) and run again.');
         return false;
       }
       username = await askLine('WordPress username: ');
@@ -1369,6 +1401,12 @@ async function runCliRegister() {
       return false;
     }
     console.log('Credentials saved securely.');
+    console.error('Verifying credentials with balance check...');
+    const balanceOk = await runCliBalance();
+    if (!balanceOk) {
+      console.error('Registration saved but verification failed: balance check did not succeed.');
+      return false;
+    }
     return true;
   } catch (err) {
     console.error('Register failed:', err.message || String(err));
@@ -1409,6 +1447,7 @@ async function runCliBalance() {
     }
     const base = await getDsoulProviderBase();
     const balanceUrl = base + '/balance';
+    console.error('Calling DSoul API:', balanceUrl);
     const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
     const res = await fetch(balanceUrl, {
       method: 'GET',
@@ -1455,6 +1494,7 @@ async function runCliFiles(opts) {
     const page = Math.max(1, parseInt(opts.page, 10) || 1);
     const perPage = Math.max(1, Math.min(500, parseInt(opts.per_page, 10) || 100));
     const filesUrl = `${base}/files?page=${encodeURIComponent(page)}&per_page=${encodeURIComponent(perPage)}`;
+    console.error('Calling DSoul API:', filesUrl);
     const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
     const res = await fetch(filesUrl, {
       method: 'GET',
@@ -1576,6 +1616,7 @@ async function runCliFreeze(opts) {
     }
     const base = await getDsoulProviderBase();
     const freezeUrl = base + '/freeze';
+    console.error('Calling DSoul API:', freezeUrl);
     const isFileUpload = FREEZE_FILE_UPLOAD_EXTS.includes(ext);
     const version = (opts.version && String(opts.version).trim()) || '1.0.0';
     const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
@@ -1775,7 +1816,7 @@ app.whenReady().then(async () => {
     }
   }
   if (cliArgs && cliArgs.command === 'register') {
-    const ok = await runCliRegister();
+    const ok = await runCliRegister(cliArgs);
     process.exit(ok ? 0 : 1);
     return;
   }
@@ -2088,6 +2129,7 @@ ipcMain.handle('fetch-dsoul-by-cid', async (event, cid) => {
   try {
     const template = await getDsoulUrlTemplate();
     const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
+    console.error('Calling DSoul API:', url);
     const res = await fetch(url);
     const text = await res.text();
     if (!res.ok) {
