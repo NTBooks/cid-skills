@@ -48,10 +48,8 @@ Desktop.ini
 test.config
 .cli-test/
 
-# Electron specific
-app/dist/
-release/
-*.asar
+# Data directory (local dev)
+.dsoul/
 
 # Temporary files
 tmp/

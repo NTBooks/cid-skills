@@ -8,8 +8,8 @@ user=
 # Application password from [ds_cli_access] shortcode (required)
 token=
 
-# DSOUL API host (optional; default https://dsoul.org)
-# dsoul_provider=https://dsoul.org
+# DSOUL API host for tests (uses donotreplace.com staging instance by default)
+dsoul_provider=https://donotreplace.com
 
 # For API Test A (supercede ownership fail): CID or Post ID of a file owned by another user.
 # If set, test verifies 400 + not_owner_supercede when trying to supercede that file.

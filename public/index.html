@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diamond Soul Downloader</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="Skills/clverify-2025-02-09-1/clverify/clverify.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top URL Bar -->
+    <div class="url-bar">
+      <img src="DSLOGO.png" alt="Diamond Soul" class="brand-logo" />
+      <input type="text" id="cid-input" placeholder="Enter IPFS path (ipfs://...) or CID (e.g., Qm... or bafy...)" />
+      <button id="load-btn">Load</button>
+      <button id="options-btn" class="options-btn">Options</button>
+      <button id="cli-btn" class="cli-btn">CLI</button>
+    </div>
+
+    <!-- CLI Panel -->
+    <div id="cli-panel" class="cli-panel hidden">
+      <div class="cli-sidebar" id="cli-sidebar"></div>
+      <div class="cli-main">
+        <div class="cli-form-area" id="cli-form-area"></div>
+        <div class="cli-console-wrap">
+          <div class="cli-console-header">
+            <span class="cli-console-title">Output</span>
+            <button id="cli-clear-btn" class="cli-clear-btn">Clear</button>
+          </div>
+          <div id="cli-console" class="cli-console"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <!-- Sidebar with File Tree -->
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <h2>Files</h2>
+          <button id="scan-updates-btn" class="scan-updates-btn" title="Check each skill for a newer version">Scan for updates</button>
+        </div>
+        <div id="file-tree" class="file-tree"></div>
+      </div>
+
+      <!-- Central Panel -->
+      <div class="central-panel">
+        <div id="loading-panel" class="loading-panel hidden">
+          <div class="loading-header">
+            <h3>Loading and Verifying IPFS File</h3>
+            <button id="cancel-load-btn" class="cancel-load-btn">Cancel</button>
+          </div>
+          <div id="gateway-status" class="gateway-status"></div>
+          <div id="verification-status" class="verification-status"></div>
+          <div id="install-section" class="install-section hidden">
+            <div class="install-message">All verification steps passed. Ready to install.</div>
+            <div class="install-actions">
+              <button id="install-btn" class="install-btn">Install</button>
+              <a id="install-clverify" cid="" mode="dark" global="true" gateway="https://chainletter.mypinata.cloud/ipfs/" api="staging-verify.clstamp.com" logo="true" class="blockchain-verify-btn">Blockchain Verify</a>
+            </div>
+          </div>
+        </div>
+
+        <div id="file-preview" class="file-preview hidden">
+          <div class="preview-header">
+            <div class="preview-header-left">
+              <h3 id="preview-title">File Preview</h3>
+              <div id="preview-tags" class="preview-tags hidden"></div>
+            </div>
+            <div class="preview-actions">
+              <button id="download-prev-btn" class="version-btn download-prev-btn hidden" title="Download and install the previous version">Download previous version</button>
+              <button id="update-available-btn" class="version-btn update-available-btn hidden" title="Download and install the newer version">Update available</button>
+              <button id="reverify-btn" class="reverify-btn">Reverify</button>
+              <a id="preview-clverify" cid="" mode="dark" global="true" gateway="https://chainletter.mypinata.cloud/ipfs/" api="staging-verify.clstamp.com" logo="true" class="blockchain-verify-btn">Blockchain Verify</a>
+            </div>
+          </div>
+          <div id="skill-metadata" class="skill-metadata hidden"></div>
+          <div id="preview-content" class="preview-content"></div>
+          <div id="cid-display" class="cid-display"></div>
+          <div id="full-json-section" class="full-json-section">
+            <div class="full-json-actions">
+              <button id="view-full-json-btn" class="view-full-json-btn">View full JSON</button>
+              <button id="refresh-json-btn" class="refresh-json-btn" title="Re-fetch from DSOUL API and update">Refresh</button>
+            </div>
+            <pre id="full-json-content" class="full-json-content hidden"></pre>
+          </div>
+        </div>
+
+        <div id="empty-state" class="empty-state">
+          <p>Enter an IPFS CID above to load a file, or select a file from the sidebar.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="app-footer">
+      <button id="open-skills-folder-btn" class="open-skills-folder-btn" title="Open the folder where activated skills are deployed">Open skills folder</button>
+    </div>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="context-menu" class="context-menu hidden">
+    <div class="context-menu-item" id="toggle-active">Activate/Deactivate</div>
+    <div class="context-menu-item" id="delete-file">Delete File</div>
+    <div class="context-menu-item" id="add-tag">Add Tag</div>
+  </div>
+
+  <!-- Tag Input Modal -->
+  <div id="tag-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Add Tag</h3>
+      <input type="text" id="tag-input" placeholder="Enter tag name" />
+      <div class="modal-buttons">
+        <button id="tag-submit">Add</button>
+        <button id="tag-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DSOUL Disambiguation Modal -->
+  <div id="dsoul-modal" class="modal hidden">
+    <div class="modal-content dsoul-modal-content">
+      <h3>Choose Diamond Soul entry for this CID</h3>
+      <p class="dsoul-modal-hint">A CID can have multiple entries on Diamond Soul. Pick the one that matches this file.</p>
+      <div id="dsoul-entries-list" class="dsoul-entries-list"></div>
+      <div class="modal-buttons">
+        <button id="dsoul-confirm-btn" class="dsoul-confirm-btn">Confirm</button>
+        <button id="dsoul-cancel-btn" class="dsoul-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- License (bundle) Modal -->
+  <div id="license-modal" class="modal hidden">
+    <div class="modal-content license-modal-content">
+      <h3>License</h3>
+      <pre id="license-modal-content" class="license-modal-body"></pre>
+      <div class="modal-buttons">
+        <button id="license-modal-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Options Modal -->
+  <div id="options-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Options</h3>
+      <div class="options-section">
+        <label for="dsoul-provider-input">DSOUL API host:</label>
+        <input type="text" id="dsoul-provider-input" class="dsoul-provider-input" placeholder="https://dsoul.org" autocomplete="url" />
+        <p class="options-help">Host only (e.g. https://dsoul.org). The path /wp-json/diamond-soul/v1 is added by the app. Leave empty to use .env or default.</p>
+      </div>
+      <div class="options-section">
+        <label>IPFS gateways:</label>
+        <p class="options-help">URLs used to download content by CID. At least one required. With one gateway, multi-source comparison is skipped.</p>
+        <div id="ipfs-gateways-list" class="ipfs-gateways-list"></div>
+        <button type="button" id="add-ipfs-gateway-btn" class="add-gateway-btn">Add gateway</button>
+      </div>
+      <div class="options-section">
+        <label for="skills-folder-input">Skills Folder:</label>
+        <div class="folder-input-group">
+          <input type="text" id="skills-folder-input" placeholder="Enter skills folder path (e.g. /home/user/skills)" />
+        </div>
+        <p class="options-help">Files activated from the file tree will be copied to this folder as {CID}.MD. Enter the full path.</p>
+      </div>
+      <div class="options-section">
+        <label for="skills-folder-name-input">Skills folder name (local):</label>
+        <input type="text" id="skills-folder-name-input" placeholder="Skills" />
+        <p class="options-help">Folder name used when installing locally (e.g. CLI <code>install</code> without <code>-g</code>). Default: Skills.</p>
+      </div>
+      <div class="modal-buttons">
+        <button id="options-save">Save</button>
+        <button id="options-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="Skills/clverify-2025-02-09-1/clverify/clverify.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,88 +1,57 @@
 {
   "name": "diamond-soul-downloader",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "Diamond Soul Downloader - Install AI Skills from IPFS",
-  "main": "main.js",
+  "main": "lib/config.js",
   "bin": {
     "dsoul": "./bin/dsoul.js"
   },
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder && npm run cleanup:dist",
-    "dist:win": "electron-builder --win && npm run cleanup:dist",
-    "dist:mac": "electron-builder --mac && npm run cleanup:dist",
-    "dist:linux": "electron-builder --linux && npm run cleanup:dist",
-    "dist:linux:wsl": "wsl bash -l -c \"cd \\\"$(wslpath '%cd%')\\\" && npm run dist:linux\"",
-    "cleanup:dist": "node scripts/cleanup-dist.js",
+    "start": "node bin/dsoul.js webstart",
+    "dev": "node bin/dsoul.js webstart",
+    "test": "node scripts/test-cli.js",
     "test:cli": "node scripts/test-cli.js",
+    "dist:win": "pkg bin/dsoul.js --targets node20-win-x64 --output dist/dsoul-win.exe",
+    "dist:mac": "pkg bin/dsoul.js --targets node20-macos-x64,node20-macos-arm64 --output dist/dsoul-mac",
+    "dist:wsl": "pkg bin/dsoul.js --targets node20-linux-x64 --output dist/dsoul-linux",
+    "dist": "npm run dist:win && npm run dist:mac && npm run dist:wsl",
+    "postdist": "node scripts/cleanup-dist.js",
     "prepdeploy": "node scripts/prepdeploy.js"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "node_modules/**/*.wasm",
+      "node_modules/**/*.json"
+    ],
+    "scripts": [
+      "bin/**/*.js",
+      "cli/**/*.js",
+      "lib/**/*.js",
+      "server/**/*.js"
+    ]
   },
   "keywords": [
     "ipfs",
-    "electron",
-    "cid"
+    "cli",
+    "cid",
+    "skills"
   ],
   "author": "Nick <nick@chainletter.io>",
   "license": "MIT",
-  "build": {
-    "appId": "com.diamondsoul.downloader",
-    "productName": "DSoul",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "renderer.js",
-      "index.html",
-      "styles.css",
-      "icon.png",
-      "Skills/clverify-2025-02-09-1/clverify/**"
-    ],
-    "asar": true,
-    "asarUnpack": [],
-    "electronLanguages": [
-      "en-US"
-    ],
-    "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ],
-      "icon": "icon.png",
-      "executableName": "DSoul"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "icon.png",
-      "category": "public.app-category.utilities"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "icon.png",
-      "category": "Utility"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
-  },
-  "devDependencies": {
-    "electron": "^40.4.0",
-    "electron-builder": "^26.7.0"
-  },
   "dependencies": {
     "archiver": "^7.0.1",
     "diff": "^5.2.0",
+    "express": "^4.21.2",
     "form-data": "^4.0.5",
+    "ink": "^5.1.0",
+    "ink-spinner": "^5.0.0",
     "ipfs-only-hash": "^2.0.1",
+    "open": "^10.1.0",
+    "react": "^18.3.1",
     "yauzl": "^2.10.0"
+  },
+  "devDependencies": {
+    "@vercel/pkg": "^5.8.1"
   }
 }
