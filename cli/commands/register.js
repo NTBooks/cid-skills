@@ -1,7 +1,6 @@
 const readline = require('readline');
 const { loadWpCredentials, saveWpCredentials, clearWpCredentials } = require('../../lib/credentials');
 const { runCliBalance } = require('./balance');
-const log = require('../log');
 
 function askLine(prompt) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -10,52 +9,53 @@ function askLine(prompt) {
   });
 }
 
-async function runCliRegister(cliArgs) {
+async function runCliRegister(cliArgs, ui) {
   try {
     if (cliArgs && cliArgs.statusOnly) {
       const existing = await loadWpCredentials();
       if (existing) {
-        log.ok(`Registered as ${log.name(existing.username)}`);
+        ui.ok('Registered as ' + ui.name(existing.username));
       } else {
-        log.info('No username registered.');
+        ui.info('No username registered.');
       }
       return true;
     }
 
-    log.header('Register credentials');
+    ui.header('Register credentials');
     let username = (cliArgs && cliArgs.username) || (process.env.DSOUL_USER || '').trim();
     let applicationKey = (cliArgs && cliArgs.token) || (process.env.DSOUL_TOKEN || process.env.DSOUL_APPLICATION_KEY || '').trim();
     if (!username || !applicationKey) {
       if (!process.stdin.isTTY) {
-        log.fail('No interactive terminal.');
-        log.info('Provide username and token: dsoul register <username> <token>');
+        ui.fail('No interactive terminal.');
+        ui.info('Provide username and token: dsoul register <username> <token>');
         return false;
       }
-      username = await askLine(`  ${log.c.cyan}?${log.c.reset} WordPress username: `);
-      if (!username) { log.fail('Username is required.'); return false; }
-      applicationKey = await askLine(`  ${log.c.cyan}?${log.c.reset} Application key: `);
-      if (!applicationKey) { log.fail('Application key is required.'); return false; }
+      const c = ui.c || {};
+      username = await askLine('  ' + (c.cyan || '') + '?' + (c.reset || '') + ' WordPress username: ');
+      if (!username) { ui.fail('Username is required.'); return false; }
+      applicationKey = await askLine('  ' + (c.cyan || '') + '?' + (c.reset || '') + ' Application key: ');
+      if (!applicationKey) { ui.fail('Application key is required.'); return false; }
     }
 
-    log.step('Saving credentials');
+    ui.step('Saving credentials');
     const result = await saveWpCredentials({ username, applicationKey });
-    if (!result.success) { log.fail('Register failed:', result.error); return false; }
-    log.ok('Credentials saved');
+    if (!result.success) { ui.fail('Register failed: ' + result.error); return false; }
+    ui.ok('Credentials saved');
 
-    log.step('Verifying with balance check');
-    const balanceOk = await runCliBalance();
-    if (!balanceOk) { log.warn('Registration saved but verification failed.'); return false; }
+    ui.step('Verifying with balance check');
+    const balanceOk = await runCliBalance(ui);
+    if (!balanceOk) { ui.warn('Registration saved but verification failed.'); return false; }
     return true;
-  } catch (err) { log.fail('Register failed:', err.message || String(err)); return false; }
+  } catch (err) { ui.fail('Register failed: ' + (err.message || String(err))); return false; }
 }
 
-async function runCliUnregister() {
+async function runCliUnregister(ui) {
   try {
-    log.step('Clearing credentials');
+    ui.step('Clearing credentials');
     await clearWpCredentials();
-    log.ok('Credentials cleared');
+    ui.ok('Credentials cleared');
     return true;
-  } catch (err) { log.fail('Unregister failed:', err.message || String(err)); return false; }
+  } catch (err) { ui.fail('Unregister failed: ' + (err.message || String(err))); return false; }
 }
 
 module.exports = { runCliRegister, runCliUnregister };

@@ -2,42 +2,41 @@ const { ensureDataDir, readFileData, loadSettings, updateDsoulJson } = require('
 const { doDeleteFile } = require('../../lib/storage');
 const { parseCID, doDeactivateFile } = require('../../lib/skills');
 const { resolveShortname } = require('../../lib/dsoul-api');
-const log = require('../log');
 
-async function runCliUninstall(target) {
+async function runCliUninstall(target, ui) {
   const t0 = Date.now();
-  log.header(`Uninstalling ${log.name(target)}`);
+  ui.header('Uninstalling ' + ui.name(target));
   await ensureDataDir();
   let cid = parseCID(target);
   if (!cid) {
-    log.step('Resolving shortname');
+    ui.step('Resolving shortname');
     const resolved = await resolveShortname(target);
-    if (!resolved.success) { log.fail(resolved.error); return false; }
+    if (!resolved.success) { ui.fail(resolved.error); return false; }
     cid = resolved.cid;
-    log.ok(`Resolved to ${log.cid(cid)}`);
+    ui.ok('Resolved to ' + ui.cid(cid));
   }
   const existing = await readFileData(cid).catch(() => null);
-  if (!existing) { log.fail(`Not installed: ${target}`); return false; }
+  if (!existing) { ui.fail('Not installed: ' + target); return false; }
 
   const skillName = existing.skillMetadata?.name || target;
 
-  log.step('Removing from dsoul.json');
+  ui.step('Removing from dsoul.json');
   const uninstallBaseFolder = existing.activatedSkillsFolder || (await loadSettings()).skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '';
   try { if (uninstallBaseFolder) await updateDsoulJson(uninstallBaseFolder, 'remove', { cid }); } catch (_) { }
 
-  log.step('Deactivating');
+  ui.step('Deactivating');
   const deactivateResult = await doDeactivateFile(cid);
   if (!deactivateResult.success && existing.active) {
-    log.warn(`Could not deactivate: ${deactivateResult.error}`);
+    ui.warn('Could not deactivate: ' + deactivateResult.error);
   }
 
-  log.step('Deleting local data');
+  ui.step('Deleting local data');
   const deleteResult = await doDeleteFile(cid);
-  if (!deleteResult.success) { log.fail(deleteResult.error || 'Failed to remove'); return false; }
+  if (!deleteResult.success) { ui.fail(deleteResult.error || 'Failed to remove'); return false; }
 
-  log.removed(skillName);
-  log.detail('cid', log.cid(cid));
-  log.timing('Done', Date.now() - t0);
+  ui.removed(skillName);
+  ui.detail('cid', ui.cid(cid));
+  ui.timing('Done', Date.now() - t0);
   return true;
 }
 

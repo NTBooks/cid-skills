@@ -6,7 +6,11 @@ const { ensureDataDir, loadSettings } = require('../lib/storage');
 const { getBlocklist, getAllInstalledCids, printBlockedCidsWarning } = require('../lib/blocklist');
 const { parseCID } = require('../lib/skills');
 const log = require('../cli/log');
-const { animateFloat, printStatic, animateHelpTitle } = require('../cli/logo');
+const { createUi } = require('../cli/ui-adapter');
+const { createUiStore } = require('../cli/ui-store');
+const { createCliRoot, e } = require('../cli/app');
+const { animateHelpTitle } = require('../cli/logo');
+const React = require('react');
 
 function getCliArgs() {
   const argv = process.argv;
@@ -82,7 +86,7 @@ function getCliArgs() {
   }
   if (cmd === 'freeze') {
     const rest = argv.slice(argIndex);
-    const nonFlags = rest.filter((a) => !a.startsWith('--'));
+    const nonFlags = rest.filter((a) => !a.startsWith('-'));
     const file = nonFlags.length ? nonFlags.join(' ').trim() : '';
     if (!file) return null;
     const opts = { file };
@@ -107,7 +111,7 @@ function getCliArgs() {
   }
   if (cmd === 'rehydrate') {
     const rest = argv.slice(argIndex);
-    const nonFlags = rest.filter((a) => !a.startsWith('--'));
+    const nonFlags = rest.filter((a) => !a.startsWith('-'));
     const contractAddress = (nonFlags[0] || '').trim();
     const folder = (nonFlags[1] || 'data').trim();
     const full = rest.includes('--full');
@@ -117,55 +121,47 @@ function getCliArgs() {
   return null;
 }
 
-async function main() {
-  const cliArgs = getCliArgs();
-
+async function main(ui, cliArgs) {
   if (!cliArgs && process.argv.length <= 2) {
     const { getCliHelpText } = require('../cli/commands/help');
     console.log(getCliHelpText());
-    process.exit(0);
-    return;
+    return true;
   }
 
   if (!cliArgs) {
-    log.fail('Invalid command. Run ' + log.c.bold + 'dsoul help' + log.c.reset + ' for usage.');
-    process.exit(1);
-    return;
+    ui.fail('Invalid command. Run dsoul help for usage.');
+    return false;
   }
 
   if (cliArgs.command === 'help') {
     const { getCliHelpText } = require('../cli/commands/help');
     await animateHelpTitle();
     console.log(getCliHelpText());
-    process.exit(0);
-    return;
+    return true;
   }
   if (cliArgs.command === 'version') {
     console.log(`${log.c.brightCyan}dsoul${log.c.reset} ${log.c.bold}${getVersion()}${log.c.reset}`);
-    process.exit(0);
-    return;
+    return true;
   }
   if (cliArgs.command === 'webstart') {
     const { runWebstart } = require('../cli/commands/webstart');
     try {
-      await runWebstart(cliArgs.port);
+      await runWebstart(cliArgs.port, ui);
+      return true;
     } catch (_) {
-      process.exit(1);
+      return false;
     }
-    return;
   }
 
   if (cliArgs.command === 'register') {
     const { runCliRegister } = require('../cli/commands/register');
-    const ok = await runCliRegister(cliArgs);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliRegister(cliArgs, ui);
+    return ok;
   }
   if (cliArgs.command === 'unregister') {
     const { runCliUnregister } = require('../cli/commands/register');
-    const ok = await runCliUnregister();
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliUnregister(ui);
+    return ok;
   }
 
   let blocklist = null;
@@ -174,7 +170,7 @@ async function main() {
     blocklist = await getBlocklist(forceRefresh);
     if (process.env.DSOUL_DEBUG) {
       const cids = [...blocklist];
-      log.dim(`Blocklist (${cids.length} CIDs): ${cids.join(', ') || '(none)'}`);
+      ui.raw(`Blocklist (${cids.length} CIDs): ${cids.join(', ') || '(none)'}`);
     }
     const installed = await getAllInstalledCids();
     const blocked = installed.filter((i) => blocklist.has(i.cid));
@@ -185,111 +181,140 @@ async function main() {
 
   if (cliArgs.command === 'balance') {
     const { runCliBalance } = require('../cli/commands/balance');
-    const ok = await runCliBalance();
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliBalance(ui);
+    return ok;
   }
   if (cliArgs.command === 'files') {
     const { runCliFiles } = require('../cli/commands/files');
-    const ok = await runCliFiles(cliArgs);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliFiles(cliArgs, ui);
+    return ok;
   }
   if (cliArgs.command === 'config') {
     const { runCliConfig } = require('../cli/commands/config');
-    const ok = await runCliConfig(cliArgs.key, cliArgs.value);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliConfig(cliArgs.key, cliArgs.value, ui);
+    return ok;
   }
   if (cliArgs.command === 'uninstall') {
     const { runCliUninstall } = require('../cli/commands/uninstall');
     await ensureDataDir();
-    const ok = await runCliUninstall(cliArgs.target);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliUninstall(cliArgs.target, ui);
+    return ok;
   }
   if (cliArgs.command === 'install') {
     const { runCliInstall, runCliInstallFromList } = require('../cli/commands/install');
     const { resolveShortname } = require('../lib/dsoul-api');
     await ensureDataDir();
     if (cliArgs.fromList) {
-      if (cliArgs.global) { log.fail('Global list installs are not available.'); process.exit(1); return; }
+      if (cliArgs.global) {
+        ui.fail('Global list installs are not available.');
+        return false;
+      }
       const installBase = (await loadSettings()).skillsFolderName || 'skills';
       const skillsFolder = path.join(process.cwd(), installBase);
-      const ok = await runCliInstallFromList(skillsFolder, { autoPickOldest: cliArgs.yes, blocklist });
-      process.exit(ok ? 0 : 1);
-      return;
+      const ok = await runCliInstallFromList(skillsFolder, { autoPickOldest: cliArgs.yes, blocklist }, ui);
+      return ok;
     }
     let cid = parseCID(cliArgs.target);
     let shortnameData = null;
     if (!cid) {
-      log.step('Resolving shortname', log.name(cliArgs.target));
+      ui.step('Resolving shortname', ui.name(cliArgs.target));
       const resolved = await resolveShortname(cliArgs.target);
-      if (!resolved.success) { log.fail(resolved.error); process.exit(1); return; }
+      if (!resolved.success) {
+        ui.fail(resolved.error);
+        return false;
+      }
       cid = resolved.cid;
       shortnameData = resolved.data;
-      log.ok(`Resolved to ${log.cid(cid)}`);
+      ui.ok('Resolved to ' + ui.cid(cid));
     }
     if (shortnameData != null) {
-      log.info('Shortname resolution:');
-      console.log(JSON.stringify(shortnameData, null, 2));
+      ui.info('Shortname resolution:');
+      ui.raw(JSON.stringify(shortnameData, null, 2));
     }
-    if (blocklist && blocklist.has(cid)) { log.fail(`Cannot install: CID ${log.cid(cid)} is on the blocklist.`); process.exit(1); return; }
+    if (blocklist && blocklist.has(cid)) {
+      ui.fail('Cannot install: CID ' + ui.cid(cid) + ' is on the blocklist.');
+      return false;
+    }
     const installBase = cliArgs.global ? null : (await loadSettings()).skillsFolderName || 'skills';
     const installOptions = cliArgs.global ? {} : { skillsFolder: path.join(process.cwd(), installBase) };
     if (cliArgs.yes) installOptions.autoPickOldest = true;
-    const ok = await runCliInstall(cid, installOptions, cliArgs.target);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliInstall(cid, installOptions, cliArgs.target, ui);
+    return ok;
   }
   if (cliArgs.command === 'init') {
     const { runCliInit } = require('../cli/commands/init');
-    const ok = await runCliInit(cliArgs.directory);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliInit(cliArgs.directory, ui);
+    return ok;
   }
   if (cliArgs.command === 'package') {
     const { runCliPackage } = require('../cli/commands/package');
-    const ok = await runCliPackage(cliArgs.folder);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliPackage(cliArgs.folder, ui);
+    return ok;
   }
   if (cliArgs.command === 'update') {
     const { runCliUpdate } = require('../cli/commands/update');
-    const ok = await runCliUpdate(cliArgs, blocklist);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliUpdate(cliArgs, blocklist, ui);
+    return ok;
   }
   if (cliArgs.command === 'upgrade') {
     const { runCliUpgrade } = require('../cli/commands/upgrade');
-    const ok = await runCliUpgrade(cliArgs, blocklist);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliUpgrade(cliArgs, blocklist, ui);
+    return ok;
   }
   if (cliArgs.command === 'freeze') {
     const { runCliFreeze } = require('../cli/commands/freeze');
-    const ok = await runCliFreeze(cliArgs);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliFreeze(cliArgs, ui);
+    return ok;
   }
   if (cliArgs.command === 'hash' && cliArgs.subcommand === 'cidv0') {
     const { runCliHashCidv0 } = require('../cli/commands/hash');
-    const ok = await runCliHashCidv0(cliArgs.file);
-    process.exit(ok ? 0 : 1);
-    return;
+    const ok = await runCliHashCidv0(cliArgs.file, ui);
+    return ok;
   }
   if (cliArgs.command === 'rehydrate') {
     const { runCliRehydrate } = require('../cli/commands/rehydrate');
-    const ok = await runCliRehydrate(cliArgs);
-    process.exit(ok ? 0 : 1);
+    const ok = await runCliRehydrate(cliArgs, ui);
+    return ok;
+  }
+
+  ui.fail('Invalid command. Run dsoul help for usage.');
+  return false;
+}
+
+async function run() {
+  const cliArgs = getCliArgs();
+
+  if (!cliArgs && process.argv.length <= 2) {
+    const { getCliHelpText } = require('../cli/commands/help');
+    console.log(getCliHelpText());
+    process.exit(0);
     return;
   }
 
-  log.fail('Invalid command. Run ' + log.c.bold + 'dsoul help' + log.c.reset + ' for usage.');
-  process.exit(1);
+  const useInk = Boolean(process.stdout.isTTY && !process.env.DSOUL_NO_TUI);
+  const store = useInk ? createUiStore() : null;
+  const ui = useInk ? createUi('ink', (ev) => store.pushEvent(ev)) : createUi('console');
+
+  if (useInk && cliArgs) {
+    try {
+      const ink = await import('ink');
+      const spinnerMod = await import('ink-spinner');
+      const Spinner = spinnerMod.default || spinnerMod;
+      const CliRoot = createCliRoot(ink, Spinner);
+      const element = React.createElement(CliRoot, { store, command: cliArgs.command });
+      ink.render(element);
+    } catch (err) {
+      // If Ink cannot be loaded (e.g. ESM/TLA issues), fall back to console-only UI.
+    }
+  }
+
+  try {
+    const ok = await main(ui, cliArgs);
+    process.exit(ok ? 0 : 1);
+  } catch (err) {
+    ui.fail('Fatal error: ' + (err.message || err));
+    process.exit(1);
+  }
 }
 
-main().catch((err) => {
-  log.fail('Fatal error:', err.message || err);
-  process.exit(1);
-});
+run();

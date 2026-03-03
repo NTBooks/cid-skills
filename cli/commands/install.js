@@ -9,7 +9,6 @@ const { getHostnameFromProviderBase, buildProviderBaseFromHostOrUrl } = require(
 const { fetchByCid, MAX_FILE_SIZE } = require('../../lib/ipfs');
 const { calculateCid } = require('../../lib/hash');
 const { getZipBundleInfo } = require('../../lib/zip');
-const log = require('../log');
 
 function askLine(prompt) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -18,57 +17,57 @@ function askLine(prompt) {
   });
 }
 
-async function runCliInstallDirectIpfs(cid, options = {}, installRef) {
+async function runCliInstallDirectIpfs(cid, options = {}, installRef, ui) {
   const t0 = Date.now();
   try {
     const settings = await loadSettings();
     const gateways = (Array.isArray(settings.ipfsGateways) && settings.ipfsGateways.length > 0 ? settings.ipfsGateways : ['https://ipfs.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/', 'https://dweb.link/ipfs/', 'https://gateway.ipfs.io/ipfs/'])
       .map((u) => { const s = (u || '').trim(); return s.endsWith('/') ? s : s + '/'; });
-    log.step('Fetching from IPFS', `${gateways.length} gateways`);
+    ui.step('Fetching from IPFS', gateways.length + ' gateways');
     let content = null;
     for (let i = 0; i < gateways.length; i++) {
       const gateway = gateways[i];
-      log.detail('trying', log.url(gateway + cid));
+      ui.detail('trying', ui.url(gateway + cid));
       try {
         const response = await fetch(gateway + cid);
-        if (!response.ok) { log.dim(`  HTTP ${response.status}, skipping`); continue; }
+        if (!response.ok) { ui.dim(`  HTTP ${response.status}, skipping`); continue; }
         const cl = response.headers.get('Content-Length');
-        if (cl && parseInt(cl, 10) > MAX_FILE_SIZE) { log.dim('  too large, skipping'); continue; }
+        if (cl && parseInt(cl, 10) > MAX_FILE_SIZE) { ui.dim('  too large, skipping'); continue; }
         const ab = await response.arrayBuffer();
-        if (ab.byteLength > MAX_FILE_SIZE) { log.dim('  too large, skipping'); continue; }
+        if (ab.byteLength > MAX_FILE_SIZE) { ui.dim('  too large, skipping'); continue; }
         content = ab;
-        log.ok(`Downloaded from gateway ${i + 1}/${gateways.length}`);
+        ui.ok(`Downloaded from gateway ${i + 1}/${gateways.length}`);
         break;
-      } catch (_) { log.dim('  failed, trying next'); }
+      } catch (_) { ui.dim('  failed, trying next'); }
     }
-    if (!content) { log.fail('Failed to download from all IPFS gateways'); return false; }
+    if (!content) { ui.fail('Failed to download from all IPFS gateways'); return false; }
     const buf = Buffer.from(content);
-    log.step('Verifying integrity');
+    ui.step('Verifying integrity');
     const hashResult = await calculateCid(buf);
-    if (hashResult !== cid) { log.fail(`Hash mismatch: expected ${log.cid(cid)}, got ${log.cid(hashResult)}`); return false; }
-    log.ok('CID verified');
+    if (hashResult !== cid) { ui.fail(`Hash mismatch: expected ${ui.cid(cid)}, got ${ui.cid(hashResult)}`); return false; }
+    ui.ok('CID verified');
 
     const isZip = buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B;
     let isBundle = false;
     let skillMetadata = null;
     let zipRootFolderName = null;
     if (isZip) {
-      log.step('Processing skill bundle');
+      ui.step('Processing skill bundle');
       const tmpPath = path.join(os.tmpdir(), `dsoul-install-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
       try {
         await fs.writeFile(tmpPath, buf);
         const info = await getZipBundleInfo(tmpPath);
-        if (!info.hasSkillMd) { log.fail('Zip does not contain Skill.MD'); return false; }
+        if (!info.hasSkillMd) { ui.fail('Zip does not contain Skill.MD'); return false; }
         isBundle = true;
         zipRootFolderName = info.singleRootFolderName || undefined;
         if (info.skillContent) skillMetadata = parseSkillHeaderForCli(info.skillContent);
-        log.ok('Bundle validated');
+        ui.ok('Bundle validated');
       } finally { await fs.unlink(tmpPath).catch(() => {}); }
     } else {
       skillMetadata = parseSkillHeaderForCli(buf.toString('utf-8'));
     }
 
-    log.step('Saving to local store');
+    ui.step('Saving to local store');
     const existing = await readFileData(cid).catch(() => null);
     const fileData = {
       cid, content: isBundle ? undefined : buf.toString('utf-8'),
@@ -78,16 +77,16 @@ async function runCliInstallDirectIpfs(cid, options = {}, installRef) {
       activatedFolderName: existing?.activatedFolderName, activatedSkillsFolder: existing?.activatedSkillsFolder
     };
     const saveResult = await saveFileData(fileData, isBundle ? buf : undefined);
-    if (!saveResult.success) { log.fail('Save failed:', saveResult.error); return false; }
+    if (!saveResult.success) { ui.fail('Save failed:', saveResult.error); return false; }
 
     const skillsFolder = options.skillsFolder != null ? options.skillsFolder : (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '');
-    if (!skillsFolder) { log.fail('Skills folder not set. Use -g and set it in Options, or set DSOUL_SKILLS_FOLDER.'); return false; }
+    if (!skillsFolder) { ui.fail('Skills folder not set. Use -g and set it in Options, or set DSOUL_SKILLS_FOLDER.'); return false; }
     if (options.skillsFolder != null) await fs.mkdir(skillsFolder, { recursive: true });
 
-    log.step('Activating skill');
+    ui.step('Activating skill');
     const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : undefined;
     const activateResult = await doActivateFile(cid, activateOptions);
-    if (!activateResult.success) { log.fail('Activate failed:', activateResult.error); return false; }
+    if (!activateResult.success) { ui.fail('Activate failed:', activateResult.error); return false; }
 
     try {
       const hostname = await getProviderHostname();
@@ -95,33 +94,33 @@ async function runCliInstallDirectIpfs(cid, options = {}, installRef) {
     } catch (_) { }
 
     const skillName = skillMetadata?.name || cid;
-    log.ok(`Installed ${log.name(skillName)}`);
-    log.detail('cid', log.cid(cid));
-    if (isBundle) log.detail('type', 'skill bundle');
-    log.timing('Done', Date.now() - t0);
+    ui.ok(`Installed ${ui.name(skillName)}`);
+    ui.detail('cid', ui.cid(cid));
+    if (isBundle) ui.detail('type', 'skill bundle');
+    ui.timing('Done', Date.now() - t0);
     return true;
-  } catch (err) { log.fail('Install failed:', err.message || String(err)); return false; }
+  } catch (err) { ui.fail('Install failed:', err.message || String(err)); return false; }
 }
 
-async function runCliInstall(cid, options = {}, installRef) {
+async function runCliInstall(cid, options = {}, installRef, ui) {
   const t0 = Date.now();
   try {
-    log.header(`Installing ${log.cid(cid)}`);
-    log.step('Resolving via DSOUL API');
+    ui.header('Installing ' + ui.cid(cid));
+    ui.step('Resolving via DSOUL API');
     const template = await getDsoulUrlTemplate(options.providerBase);
     const url = template.replace(/\{CID\}/g, encodeURIComponent(cid));
-    log.detail('endpoint', log.url(url));
+    ui.detail('endpoint', ui.url(url));
     const res = await fetch(url);
     const text = await res.text();
-    if (!res.ok) { log.fail(`DSOUL API error: HTTP ${res.status}: ${text || res.statusText}`); return false; }
+    if (!res.ok) { ui.fail(`DSOUL API error: HTTP ${res.status}: ${text || res.statusText}`); return false; }
     let data;
-    try { data = JSON.parse(text); } catch (_) { log.fail('Invalid JSON from DSOUL API'); return false; }
+    try { data = JSON.parse(text); } catch (_) { ui.fail('Invalid JSON from DSOUL API'); return false; }
     const entries = Array.isArray(data) ? data : [];
     if (entries.length === 0) {
-      log.info('No DSOUL entries found, trying direct IPFS download');
-      return await runCliInstallDirectIpfs(cid, options, installRef);
+      ui.info('No DSOUL entries found, trying direct IPFS download');
+      return await runCliInstallDirectIpfs(cid, options, installRef, ui);
     }
-    log.ok(`Found ${entries.length} DSOUL entr${entries.length === 1 ? 'y' : 'ies'}`);
+    ui.ok(`Found ${entries.length} DSOUL entr${entries.length === 1 ? 'y' : 'ies'}`);
 
     let entry;
     const disambiguated = pickEntryByPostIdOrLink(entries, options.postId, options.postLink);
@@ -130,27 +129,29 @@ async function runCliInstall(cid, options = {}, installRef) {
     else if (options.autoPickOldest) {
       const sorted = [...entries].sort((a, b) => getEntryDateMs(a) - getEntryDateMs(b));
       entry = sorted[0];
-      log.info(`Multiple entries — auto-selecting oldest: ${log.name(entry.name || cid)}`);
+      ui.info(`Multiple entries — auto-selecting oldest: ${ui.name(entry.name || cid)}`);
     } else {
       const sorted = [...entries].sort((a, b) => getEntryDateMs(a) - getEntryDateMs(b));
-      log.header('Multiple entries for this CID');
-      console.log('');
+      ui.header('Multiple entries for this CID');
+      ui.raw('');
       sorted.forEach((e, i) => {
         const name = e.name || 'Unnamed';
-        const author = e.author_name ? ` by ${e.author_name}` : '';
+        const author = e.author_name ? ' by ' + e.author_name : '';
         const dateRaw = e.date || e.date_gmt || e.modified || e.post_date;
         const dateStr = dateRaw ? new Date(dateRaw).toISOString().slice(0, 10) : '';
-        const tags = Array.isArray(e.tags) && e.tags.length ? ` ${e.tags.map(log.tag).join(', ')}` : '';
-        const link = e.download_url || e.wordpress_url || e.link ? ` — ${log.url(e.download_url || e.wordpress_url || e.link)}` : '';
-        console.log(`  ${log.c.bold}${i + 1})${log.c.reset} ${log.name(name)}${author}${dateStr ? ` ${log.c.gray}(${dateStr})${log.c.reset}` : ''}${tags}${link}`);
+        const tags = Array.isArray(e.tags) && e.tags.length ? ' ' + e.tags.map(ui.tag).join(', ') : '';
+        const link = e.download_url || e.wordpress_url || e.link ? ' — ' + ui.url(e.download_url || e.wordpress_url || e.link) : '';
+        const c = ui.c || {};
+        ui.raw('  ' + (c.bold || '') + (i + 1) + ')' + (c.reset || '') + ' ' + ui.name(name) + author + (dateStr ? ' ' + (c.gray || '') + '(' + dateStr + ')' + (c.reset || '') : '') + tags + link);
       });
-      console.log('');
+      ui.raw('');
       const isTty = process.stdin.isTTY && process.stdout.isTTY;
-      if (!isTty) { entry = sorted[0]; log.info('Non-interactive; using oldest (1).'); }
+      if (!isTty) { entry = sorted[0]; ui.info('Non-interactive; using oldest (1).'); }
       else {
-        const answer = await askLine(`  ${log.c.cyan}?${log.c.reset} Enter number (1-${sorted.length}): `);
+        const c = ui.c || {};
+        const answer = await askLine('  ' + (c.cyan || '') + '?' + (c.reset || '') + ' Enter number (1-' + sorted.length + '): ');
         const idx = parseInt(answer, 10);
-        if (Number.isNaN(idx) || idx < 1 || idx > sorted.length) { log.warn('Invalid choice. Using oldest (1).'); entry = sorted[0]; }
+        if (Number.isNaN(idx) || idx < 1 || idx > sorted.length) { ui.warn('Invalid choice. Using oldest (1).'); entry = sorted[0]; }
         else { entry = sorted[idx - 1]; }
       }
     }
@@ -163,35 +164,35 @@ async function runCliInstall(cid, options = {}, installRef) {
     const gateways = (Array.isArray(settings.ipfsGateways) && settings.ipfsGateways.length > 0 ? settings.ipfsGateways : ['https://ipfs.io/ipfs/', 'https://gateway.pinata.cloud/ipfs/', 'https://dweb.link/ipfs/', 'https://gateway.ipfs.io/ipfs/'])
       .map((u) => { const s = (u || '').trim(); return s.endsWith('/') ? s : s + '/'; });
 
-    log.step('Downloading from IPFS', `${gateways.length} gateways`);
+    ui.step('Downloading from IPFS', `${gateways.length} gateways`);
     let content = null;
     for (let i = 0; i < gateways.length; i++) {
       const gateway = gateways[i];
-      log.detail('trying', log.url(gateway + cid));
+      ui.detail('trying', ui.url(gateway + cid));
       try {
         const response = await fetch(gateway + cid);
-        if (!response.ok) { log.dim(`  HTTP ${response.status}, skipping`); continue; }
+        if (!response.ok) { ui.dim(`  HTTP ${response.status}, skipping`); continue; }
         const cl = response.headers.get('Content-Length');
-        if (cl && parseInt(cl, 10) > MAX_FILE_SIZE) { log.dim('  too large, skipping'); continue; }
+        if (cl && parseInt(cl, 10) > MAX_FILE_SIZE) { ui.dim('  too large, skipping'); continue; }
         const ab = await response.arrayBuffer();
-        if (ab.byteLength > MAX_FILE_SIZE) { log.dim('  too large, skipping'); continue; }
+        if (ab.byteLength > MAX_FILE_SIZE) { ui.dim('  too large, skipping'); continue; }
         content = ab;
-        log.ok(`Downloaded ${(ab.byteLength / 1024).toFixed(1)} KB from gateway ${i + 1}/${gateways.length}`);
+        ui.ok(`Downloaded ${(ab.byteLength / 1024).toFixed(1)} KB from gateway ${i + 1}/${gateways.length}`);
         break;
-      } catch (_) { log.dim('  failed, trying next'); }
+      } catch (_) { ui.dim('  failed, trying next'); }
     }
-    if (!content) { log.fail('Failed to download from all IPFS gateways'); return false; }
+    if (!content) { ui.fail('Failed to download from all IPFS gateways'); return false; }
 
     const buf = Buffer.from(content);
-    log.step('Verifying integrity');
+    ui.step('Verifying integrity');
     const hashResult = await calculateCid(buf);
-    if (hashResult !== cid) { log.fail(`Hash mismatch: expected ${log.cid(cid)}, got ${log.cid(hashResult)}`); return false; }
-    log.ok('CID verified');
+    if (hashResult !== cid) { ui.fail(`Hash mismatch: expected ${ui.cid(cid)}, got ${ui.cid(hashResult)}`); return false; }
+    ui.ok('CID verified');
 
     const contentStr = buf.toString('utf-8');
     const skillMetadata = isBundle ? null : parseSkillHeaderForCli(contentStr);
 
-    log.step('Saving to local store');
+    ui.step('Saving to local store');
     const existing = await readFileData(cid).catch(() => null);
     const fileData = {
       cid, content: isBundle ? undefined : contentStr,
@@ -201,16 +202,16 @@ async function runCliInstall(cid, options = {}, installRef) {
       activatedFolderName: existing?.activatedFolderName, activatedSkillsFolder: existing?.activatedSkillsFolder
     };
     const saveResult = await saveFileData(fileData, isBundle ? buf : undefined);
-    if (!saveResult.success) { log.fail('Save failed:', saveResult.error); return false; }
+    if (!saveResult.success) { ui.fail('Save failed:', saveResult.error); return false; }
 
     const skillsFolder = options.skillsFolder != null ? options.skillsFolder : (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '');
-    if (!skillsFolder) { log.fail('Skills folder not set.'); return false; }
+    if (!skillsFolder) { ui.fail('Skills folder not set.'); return false; }
     if (options.skillsFolder != null) await fs.mkdir(skillsFolder, { recursive: true });
 
-    log.step('Activating skill');
+    ui.step('Activating skill');
     const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : undefined;
     const activateResult = await doActivateFile(cid, activateOptions);
-    if (!activateResult.success) { log.fail('Activate failed:', activateResult.error); return false; }
+    if (!activateResult.success) { ui.fail('Activate failed:', activateResult.error); return false; }
 
     const { postId, postLink } = resolvePostIdFromEntry(entry);
     if (postId) recordFileMetric(postId, 'download').catch(() => {});
@@ -223,32 +224,32 @@ async function runCliInstall(cid, options = {}, installRef) {
     } catch (_) { }
 
     const skillName = skillMetadata?.name || entry.name || cid;
-    log.added(skillName);
-    log.detail('cid', log.cid(cid));
-    if (isBundle) log.detail('type', 'skill bundle');
-    if (entry.author_name) log.detail('author', entry.author_name);
-    log.timing('Done', Date.now() - t0);
+    ui.added(skillName);
+    ui.detail('cid', ui.cid(cid));
+    if (isBundle) ui.detail('type', 'skill bundle');
+    if (entry.author_name) ui.detail('author', entry.author_name);
+    ui.timing('Done', Date.now() - t0);
     return true;
-  } catch (err) { log.fail('Install failed:', err.message || String(err)); return false; }
+  } catch (err) { ui.fail('Install failed:', err.message || String(err)); return false; }
 }
 
-async function runCliInstallFromList(skillsFolder, options = {}) {
+async function runCliInstallFromList(skillsFolder, options = {}, ui) {
   const t0 = Date.now();
   const filepath = getDsoulJsonPath(skillsFolder);
-  log.header('Installing from dsoul.json');
-  log.detail('path', filepath);
+  ui.header('Installing from dsoul.json');
+  ui.detail('path', filepath);
   let data;
   try {
     const content = await fs.readFile(filepath, 'utf-8');
     data = JSON.parse(content);
   } catch (e) {
-    if (e.code === 'ENOENT') { log.fail(`dsoul.json not found at ${filepath}`); return false; }
-    log.fail(`Failed to read dsoul.json: ${e.message || String(e)}`); return false;
+    if (e.code === 'ENOENT') { ui.fail(`dsoul.json not found at ${filepath}`); return false; }
+    ui.fail(`Failed to read dsoul.json: ${e.message || String(e)}`); return false;
   }
   const skills = Array.isArray(data.skills) ? data.skills : [];
-  if (skills.length === 0) { log.info('No skills listed in dsoul.json.'); return true; }
-  log.info(`Found ${skills.length} skill${skills.length === 1 ? '' : 's'} in manifest`);
-  console.log('');
+  if (skills.length === 0) { ui.info('No skills listed in dsoul.json.'); return true; }
+  ui.info('Found ' + skills.length + ' skill' + (skills.length === 1 ? '' : 's') + ' in manifest');
+  ui.raw('');
 
   let okCount = 0, failCount = 0;
   for (let idx = 0; idx < skills.length; idx++) {
@@ -263,23 +264,23 @@ async function runCliInstallFromList(skillsFolder, options = {}) {
     let installRef = shortname || cidStr;
 
     const label = shortname || cidStr || '?';
-    log.step(`[${idx + 1}/${skills.length}]`, log.name(label));
+    ui.step(`[${idx + 1}/${skills.length}]`, ui.name(label));
 
     if (!resolvedCid && shortname) {
-      log.dim(`  resolving shortname...`);
+      ui.dim(`  resolving shortname...`);
       const resolved = await resolveShortname(shortname, providerBase);
-      if (!resolved.success) { log.fail(`Skip ${label}: ${resolved.error}`); failCount++; continue; }
+      if (!resolved.success) { ui.fail(`Skip ${label}: ${resolved.error}`); failCount++; continue; }
       resolvedCid = resolved.cid;
     }
-    if (!resolvedCid) { log.fail(`Skip: no valid cid or shortname`); failCount++; continue; }
-    if (options.blocklist && options.blocklist.has(resolvedCid)) { log.warn(`Skip ${log.cid(resolvedCid)}: blocklisted`); failCount++; continue; }
+    if (!resolvedCid) { ui.fail(`Skip: no valid cid or shortname`); failCount++; continue; }
+    if (options.blocklist && options.blocklist.has(resolvedCid)) { ui.warn(`Skip ${ui.cid(resolvedCid)}: blocklisted`); failCount++; continue; }
     const installOptions = { skillsFolder, providerBase: providerBase || undefined, postId: postId || undefined, postLink: postLink || undefined, autoPickOldest: options.autoPickOldest === true };
-    const ok = await runCliInstall(resolvedCid, installOptions, installRef);
+    const ok = await runCliInstall(resolvedCid, installOptions, installRef, ui);
     if (ok) okCount++; else failCount++;
   }
-  console.log('');
-  log.summary({ added: okCount, failed: failCount || undefined });
-  log.timing('List install complete', Date.now() - t0);
+  ui.raw('');
+  ui.summary({ added: okCount, failed: failCount || undefined });
+  ui.timing('List install complete', Date.now() - t0);
   return failCount === 0;
 }
 

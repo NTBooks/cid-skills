@@ -1,22 +1,23 @@
 const { loadSettings, saveSettings } = require('../../lib/storage');
-const log = require('../log');
 
-async function runCliConfig(key, value) {
+async function runCliConfig(key, value, ui) {
   const keyToSetting = { 'dsoul-provider': 'dsoulProviderUrl', 'skills-folder': 'skillsFolder', 'skills-folder-name': 'skillsFolderName' };
   const settingKey = keyToSetting[key];
-  if (!settingKey) { log.fail('Unknown config key:', key); return false; }
+  if (!settingKey) { ui.fail('Unknown config key: ' + key); return false; }
   const settings = await loadSettings();
   if (value !== undefined) {
     settings[settingKey] = value;
     const result = await saveSettings(settings);
-    if (!result.success) { log.fail(result.error || 'Failed to save settings'); return false; }
-    log.ok(`${log.c.bold}${key}${log.c.reset} set to ${log.c.cyan}${value}${log.c.reset}`);
+    if (!result.success) { ui.fail(result.error || 'Failed to save settings'); return false; }
+    const c = ui.c || {};
+    ui.ok((c.bold || '') + key + (c.reset || '') + ' set to ' + (c.cyan || '') + value + (c.reset || ''));
   } else {
     const current = settings[settingKey] || '';
     if (current) {
-      log.detail(key, log.c.cyan + current + log.c.reset);
+      const c = ui.c || {};
+      ui.detail(key, (c.cyan || '') + current + (c.reset || ''));
     } else {
-      log.dim(`${key}: (not set)`);
+      ui.dim(key + ': (not set)');
     }
   }
   return true;

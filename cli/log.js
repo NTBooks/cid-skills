@@ -33,67 +33,64 @@ const SYM = {
   spinner: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
 };
 
-function info(...args) {
-  console.log(`${c.cyan}info${c.reset}`, ...args);
+function formatInfo(message) {
+  return `${c.cyan}info${c.reset} ${message}`;
 }
 
-function ok(...args) {
-  console.log(`${SYM.ok}`, ...args);
+function formatOk(message) {
+  return `${SYM.ok} ${message}`;
 }
 
-function warn(...args) {
-  console.log(`${SYM.warn} ${c.yellow}warn${c.reset}`, ...args);
+function formatWarn(message) {
+  return `${SYM.warn} ${c.yellow}warn${c.reset} ${message}`;
 }
 
-function fail(...args) {
-  console.error(`${SYM.fail} ${c.red}ERR!${c.reset}`, ...args);
+function formatFail(message) {
+  return `${SYM.fail} ${c.red}ERR!${c.reset} ${message}`;
 }
 
-function step(label, detail) {
+function formatStep(label, detail) {
   if (detail !== undefined) {
-    console.log(`${SYM.arrow} ${c.bold}${label}${c.reset} ${c.gray}${detail}${c.reset}`);
-  } else {
-    console.log(`${SYM.arrow} ${c.bold}${label}${c.reset}`);
+    return `${SYM.arrow} ${c.bold}${label}${c.reset} ${c.gray}${detail}${c.reset}`;
   }
+  return `${SYM.arrow} ${c.bold}${label}${c.reset}`;
 }
 
-function detail(label, value) {
-  console.log(`  ${SYM.bullet} ${c.gray}${label}:${c.reset} ${value}`);
+function formatDetail(label, value) {
+  return `  ${SYM.bullet} ${c.gray}${label}:${c.reset} ${value}`;
 }
 
-function added(name) {
-  console.log(`${SYM.plus} ${c.green}${name}${c.reset}`);
+function formatAdded(nameStr) {
+  return `${SYM.plus} ${c.green}${nameStr}${c.reset}`;
 }
 
-function removed(name) {
-  console.log(`${SYM.minus} ${c.red}${name}${c.reset}`);
+function formatRemoved(nameStr) {
+  return `${SYM.minus} ${c.red}${nameStr}${c.reset}`;
 }
 
-function header(text) {
-  console.log('');
-  console.log(`${c.bold}${c.cyan}${text}${c.reset}`);
+function formatHeader(text) {
+  return `${c.bold}${c.cyan}${text}${c.reset}`;
 }
 
-function dim(...args) {
-  console.log(`${c.gray}${args.join(' ')}${c.reset}`);
+function formatDim(message) {
+  return `${c.gray}${message}${c.reset}`;
 }
 
-function banner(text) {
-  console.log(`${c.bold}${c.brightCyan}${text}${c.reset}`);
+function formatBanner(text) {
+  return `${c.bold}${c.brightCyan}${text}${c.reset}`;
 }
 
-function progress(current, total, label) {
-  const pct = Math.round((current / total) * 100);
+function formatProgressLine(current, total, label) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   const barLen = 20;
-  const filled = Math.round((current / total) * barLen);
+  const ratio = total > 0 ? current / total : 0;
+  const filled = Math.max(0, Math.min(barLen, Math.round(ratio * barLen)));
   const empty = barLen - filled;
   const bar = `${c.cyan}${'█'.repeat(filled)}${c.gray}${'░'.repeat(empty)}${c.reset}`;
-  process.stdout.write(`\r  ${bar} ${pct}% ${label || ''}`);
-  if (current >= total) process.stdout.write('\n');
+  return `  ${bar} ${pct}% ${label || ''}`;
 }
 
-function summary(stats) {
-  console.log('');
+function formatSummary(stats) {
   const parts = [];
   if (stats.added != null) parts.push(`${c.green}${stats.added} added${c.reset}`);
   if (stats.updated != null) parts.push(`${c.cyan}${stats.updated} updated${c.reset}`);
@@ -101,12 +98,12 @@ function summary(stats) {
   if (stats.failed != null) parts.push(`${c.red}${stats.failed} failed${c.reset}`);
   if (stats.skipped != null) parts.push(`${c.yellow}${stats.skipped} skipped${c.reset}`);
   if (stats.unchanged != null) parts.push(`${c.gray}${stats.unchanged} unchanged${c.reset}`);
-  console.log(parts.join(', '));
+  return parts.join(', ');
 }
 
-function timing(label, ms) {
+function formatTiming(label, ms) {
   const sec = (ms / 1000).toFixed(1);
-  console.log(`${c.gray}${label} in ${sec}s${c.reset}`);
+  return `${c.gray}${label} in ${sec}s${c.reset}`;
 }
 
 function cid(cidStr) {
@@ -125,4 +122,81 @@ function tag(tagStr) {
   return `${c.magenta}${tagStr}${c.reset}`;
 }
 
-module.exports = { c, SYM, info, ok, warn, fail, step, detail, added, removed, header, dim, banner, progress, summary, timing, cid, name, url, tag };
+module.exports = {
+  c,
+  SYM,
+  // formatting helpers
+  formatInfo,
+  formatOk,
+  formatWarn,
+  formatFail,
+  formatStep,
+  formatDetail,
+  formatAdded,
+  formatRemoved,
+  formatHeader,
+  formatDim,
+  formatBanner,
+  formatProgressLine,
+  formatSummary,
+  formatTiming,
+  // value formatters
+  cid,
+  name,
+  url,
+  tag,
+  // legacy-style helpers used by existing command code.
+  // These wrap console output so older call sites keep working
+  // while we migrate to the ui-adapter interface.
+  info(...args) {
+    const msg = args.join(' ');
+    console.log(formatInfo(msg));
+  },
+  ok(...args) {
+    const msg = args.join(' ');
+    console.log(formatOk(msg));
+  },
+  warn(...args) {
+    const msg = args.join(' ');
+    console.log(formatWarn(msg));
+  },
+  fail(...args) {
+    const msg = args.join(' ');
+    console.error(formatFail(msg));
+  },
+  step(label, detail) {
+    console.log(formatStep(label, detail));
+  },
+  detail(label, value) {
+    console.log(formatDetail(label, value));
+  },
+  added(nameStr) {
+    console.log(formatAdded(nameStr));
+  },
+  removed(nameStr) {
+    console.log(formatRemoved(nameStr));
+  },
+  header(text) {
+    console.log('');
+    console.log(formatHeader(text));
+  },
+  dim(...args) {
+    const msg = args.join(' ');
+    console.log(formatDim(msg));
+  },
+  banner(text) {
+    console.log(formatBanner(text));
+  },
+  progress(current, total, label) {
+    const line = formatProgressLine(current, total, label);
+    process.stdout.write(`\r${line}`);
+    if (total > 0 && current >= total) process.stdout.write('\n');
+  },
+  summary(stats) {
+    console.log('');
+    console.log(formatSummary(stats));
+  },
+  timing(label, ms) {
+    console.log(formatTiming(label, ms));
+  },
+};

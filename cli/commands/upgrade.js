@@ -3,11 +3,9 @@ const { ensureDataDir, loadSettings, readDsoulJson, updateDsoulJson, doDeleteFil
 const { fetchUpgradeGraph, interpretGraphForUpgrade } = require('../../lib/dsoul-api');
 const { doDeactivateFile, sameResolvedDir } = require('../../lib/skills');
 const { runCliInstall } = require('./install');
-const log = require('../log');
-
-async function runCliUpgrade(cliArgs, blocklist) {
+async function runCliUpgrade(cliArgs, blocklist, ui) {
   const t0 = Date.now();
-  log.header('Upgrading skills');
+  ui.header('Upgrading skills');
   await ensureDataDir();
   const settings = await loadSettings();
   const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
@@ -21,11 +19,11 @@ async function runCliUpgrade(cliArgs, blocklist) {
     if (!globalFolder || !sameResolvedDir(globalFolder, localFolder)) folders.push({ dir: localFolder, label: 'local' });
   }
 
-  log.step('Scanning for upgrades');
+  ui.step('Scanning for upgrades');
   const toUpgrade = [];
   for (const { dir, label } of folders) {
     let data;
-    try { data = await readDsoulJson(dir); } catch (e) { log.fail(`Failed to read ${label} dsoul.json:`, e.message); continue; }
+    try { data = await readDsoulJson(dir); } catch (e) { ui.fail('Failed to read ' + label + ' dsoul.json: ' + e.message); continue; }
     const skills = Array.isArray(data.skills) ? data.skills : [];
     for (const skill of skills) {
       const cidStr = skill.cid || '';
@@ -42,37 +40,37 @@ async function runCliUpgrade(cliArgs, blocklist) {
   }
 
   if (toUpgrade.length === 0) {
-    log.ok('All skills are up to date');
-    log.timing('Done', Date.now() - t0);
+    ui.ok('All skills are up to date');
+    ui.timing('Done', Date.now() - t0);
     return true;
   }
 
-  log.info(`${toUpgrade.length} upgrade(s) to apply`);
-  console.log('');
+  ui.info(toUpgrade.length + ' upgrade(s) to apply');
+  ui.raw('');
   let hadError = false;
   let upgraded = 0;
 
   for (let i = 0; i < toUpgrade.length; i++) {
     const { currentCid, latestCid, name: skillName, dir, label } = toUpgrade[i];
-    log.step(`[${i + 1}/${toUpgrade.length}] Upgrading ${log.name(skillName)}`, `${label}`);
-    log.detail('from', log.cid(currentCid));
-    log.detail('to', log.cid(latestCid));
+    ui.step(`[${i + 1}/${toUpgrade.length}] Upgrading ${ui.name(skillName)}`, `${label}`);
+    ui.detail('from', ui.cid(currentCid));
+    ui.detail('to', ui.cid(latestCid));
 
-    log.dim('  removing old version...');
-    try { await updateDsoulJson(dir, 'remove', { cid: currentCid }); } catch (e) { log.fail('update dsoul.json:', e.message); hadError = true; continue; }
+    ui.dim('  removing old version...');
+    try { await updateDsoulJson(dir, 'remove', { cid: currentCid }); } catch (e) { ui.fail('update dsoul.json: ' + e.message); hadError = true; continue; }
     const deactivateResult = await doDeactivateFile(currentCid);
-    if (!deactivateResult.success) log.warn(`deactivate: ${deactivateResult.error}`);
+    if (!deactivateResult.success) ui.warn(`deactivate: ${deactivateResult.error}`);
     const deleteResult = await doDeleteFile(currentCid);
-    if (!deleteResult.success) { log.fail('delete failed:', deleteResult.error); hadError = true; continue; }
+    if (!deleteResult.success) { ui.fail('delete failed:', deleteResult.error); hadError = true; continue; }
 
-    log.dim('  installing new version...');
-    const ok = await runCliInstall(latestCid, { skillsFolder: dir, autoPickOldest: true }, latestCid);
+    ui.dim('  installing new version...');
+    const ok = await runCliInstall(latestCid, { skillsFolder: dir, autoPickOldest: true }, latestCid, ui);
     if (ok) upgraded++; else hadError = true;
   }
 
-  console.log('');
-  log.summary({ updated: upgraded, failed: hadError ? toUpgrade.length - upgraded : undefined });
-  log.timing('Upgrade complete', Date.now() - t0);
+  ui.raw('');
+  ui.summary({ updated: upgraded, failed: hadError ? toUpgrade.length - upgraded : undefined });
+  ui.timing('Upgrade complete', Date.now() - t0);
   return !hadError;
 }
 

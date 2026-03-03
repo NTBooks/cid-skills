@@ -4,7 +4,6 @@ const { loadSettings, readDsoulJson, updateDsoulJson, doDeleteFile } = require('
 const { fetchUpgradeGraph, interpretGraphForUpgrade } = require('../../lib/dsoul-api');
 const { doDeactivateFile, sameResolvedDir } = require('../../lib/skills');
 const { getAllInstalledCids } = require('../../lib/blocklist');
-const log = require('../log');
 
 function askLine(prompt) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -13,9 +12,9 @@ function askLine(prompt) {
   });
 }
 
-async function runCliUpdate(cliArgs, blocklist) {
+async function runCliUpdate(cliArgs, blocklist, ui) {
   const t0 = Date.now();
-  log.header('Checking for updates');
+  ui.header('Checking for updates');
   const settings = await loadSettings();
   const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
   const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'skills';
@@ -33,67 +32,76 @@ async function runCliUpdate(cliArgs, blocklist) {
 
   for (const { dir, label } of folders) {
     let data;
-    try { data = await readDsoulJson(dir); } catch (e) { log.fail(`Failed to read ${label} dsoul.json:`, e.message); hadError = true; continue; }
+    try { data = await readDsoulJson(dir); } catch (e) { ui.fail('Failed to read ' + label + ' dsoul.json: ' + e.message); hadError = true; continue; }
     const skills = Array.isArray(data.skills) ? data.skills : [];
     if (skills.length === 0) continue;
     hadSkills = true;
 
-    log.header(`${label} (${dir})`);
+    ui.header(label + ' (' + dir + ')');
     for (let i = 0; i < skills.length; i++) {
       const skill = skills[i];
       const cidStr = skill.cid || '';
       const skillName = skill.shortname || cidStr || '?';
       const postIdOrLink = skill.num != null ? skill.num : (skill.src && String(skill.src).trim()) || (skill.post_id != null ? skill.post_id : (skill.post_link && String(skill.post_link).trim()) || null);
       if (postIdOrLink == null) {
-        log.dim(`  ${skillName}: no tracking info (reinstall to record)`);
+        ui.dim('  ' + skillName + ': no tracking info (reinstall to record)');
         continue;
       }
       const result = await fetchUpgradeGraph(postIdOrLink);
-      if (!result.success) { log.warn(`${skillName}: ${result.error}`); hadError = true; continue; }
+      if (!result.success) { ui.warn(skillName + ': ' + result.error); hadError = true; continue; }
       const { upgradeAvailable, latestCid, reason } = interpretGraphForUpgrade(result.data, cidStr);
       if (upgradeAvailable) {
-        console.log(`  ${log.SYM.arrow} ${log.name(skillName)} ${log.c.yellow}upgrade available${log.c.reset} ${log.c.gray}${cidStr.slice(0, 12)}..${log.c.reset} ${log.c.green}→${log.c.reset} ${log.cid(latestCid)}`);
+        const c = ui.c || {};
+        const SYM = ui.SYM || {};
+        ui.raw('  ' + (SYM.arrow || '') + ' ' + ui.name(skillName) + ' ' + (c.yellow || '') + 'upgrade available' + (c.reset || '') + ' ' + (c.gray || '') + cidStr.slice(0, 12) + '..' + (c.reset || '') + ' ' + (c.green || '') + '→' + (c.reset || '') + ' ' + ui.cid(latestCid));
         upgradeCount++;
       } else {
-        console.log(`  ${log.SYM.ok} ${skillName} ${log.c.gray}${reason}${log.c.reset}`);
+        const c = ui.c || {};
+        const SYM = ui.SYM || {};
+        ui.raw('  ' + (SYM.ok || '') + ' ' + skillName + ' ' + (c.gray || '') + reason + (c.reset || ''));
         currentCount++;
       }
     }
   }
 
-  if (!hadSkills) log.info('No installed skills found.');
+  if (!hadSkills) ui.info('No installed skills found.');
 
   if (blocklist && blocklist.size > 0) {
     const installed = await getAllInstalledCids();
     const blocked = installed.filter((i) => blocklist.has(i.cid));
     if (blocked.length > 0) {
-      console.log('');
-      log.warn(`${blocked.length} blocked CID(s) found`);
+      ui.raw('');
+      ui.warn(blocked.length + ' blocked CID(s) found');
       let yes = false;
       if (cliArgs.deleteBlocked === true) yes = true;
       else if (cliArgs.deleteBlocked === false) yes = false;
-      else { const answer = await askLine(`  ${log.c.cyan}?${log.c.reset} Delete all blocked items? [y/N]: `); yes = /^y(es)?$/i.test(answer.trim()); }
+      else {
+        const c = ui.c || {};
+        const answer = await askLine('  ' + (c.cyan || '') + '?' + (c.reset || '') + ' Delete all blocked items? [y/N]: ');
+        yes = /^y(es)?$/i.test(answer.trim());
+      }
       if (yes) {
         const uniqueCids = [...new Set(blocked.map((b) => b.cid))];
         for (const cid of uniqueCids) {
           const dirs = blocked.filter((b) => b.cid === cid).map((b) => b.dir);
-          for (const dir of dirs) { try { await updateDsoulJson(dir, 'remove', { cid }); } catch (e) { log.fail(e.message); hadError = true; } }
+          for (const dir of dirs) { try { await updateDsoulJson(dir, 'remove', { cid }); } catch (e) { ui.fail(e.message); hadError = true; } }
           const deactivateResult = await doDeactivateFile(cid);
-          if (!deactivateResult.success) log.warn(`Deactivate ${log.cid(cid)}: ${deactivateResult.error}`);
+          if (!deactivateResult.success) ui.warn('Deactivate ' + ui.cid(cid) + ': ' + deactivateResult.error);
           const deleteResult = await doDeleteFile(cid);
-          if (!deleteResult.success) { log.fail(`Delete ${log.cid(cid)}: ${deleteResult.error}`); hadError = true; }
-          else { log.removed(`blocked: ${cid}`); }
+          if (!deleteResult.success) { ui.fail('Delete ' + ui.cid(cid) + ': ' + deleteResult.error); hadError = true; }
+          else { ui.removed('blocked: ' + cid); }
         }
       }
     }
   }
 
-  console.log('');
+  ui.raw('');
   if (upgradeCount > 0) {
-    log.info(`${log.c.yellow}${upgradeCount} upgrade(s) available${log.c.reset}. Run ${log.c.bold}dsoul upgrade${log.c.reset} to apply.`);
+    const c = ui.c || {};
+    ui.info((c.yellow || '') + upgradeCount + ' upgrade(s) available' + (c.reset || '') + '. Run ' + (c.bold || '') + 'dsoul upgrade' + (c.reset || '') + ' to apply.');
   }
-  if (currentCount > 0) log.dim(`${currentCount} skill(s) up to date`);
-  log.timing('Update check complete', Date.now() - t0);
+  if (currentCount > 0) ui.dim(currentCount + ' skill(s) up to date');
+  ui.timing('Update check complete', Date.now() - t0);
   return !hadError;
 }
 
