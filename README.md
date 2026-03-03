@@ -171,7 +171,7 @@ dsoul install [-g] [-y] <cid-or-shortname>
 Blocked CIDs (from the provider blocklist) cannot be installed; the CLI will exit with an error.
 
 - **&lt;cid-or-shortname&gt;**
-  - A valid IPFS CID (e.g. `QmXoypiz...`, `bafy...`) or `ipfs://Qm...`
+  - A valid IPFS CIDv0 (e.g. `QmXoypiz...`) or `ipfs://Qm...`
   - Or a shortname (e.g. `user@project:v1`) if shortname resolution is configured
 
 - **-g** (global)

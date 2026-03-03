@@ -945,6 +945,12 @@ body {
   font-size: 16px;
 }
 
+.alert-modal-message {
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .license-modal-content {
   min-width: 80ch;
   max-width: 90vw;

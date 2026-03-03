@@ -12,7 +12,7 @@
     <!-- Top URL Bar -->
     <div class="url-bar">
       <img src="DSLOGO.png" alt="Diamond Soul" class="brand-logo" />
-      <input type="text" id="cid-input" placeholder="Enter IPFS path (ipfs://...) or CID (e.g., Qm... or bafy...)" />
+      <input type="text" id="cid-input" placeholder="Enter IPFS path (ipfs://...) or CID (e.g., Qm...)" />
       <button id="load-btn">Load</button>
       <button id="options-btn" class="options-btn">Options</button>
       <button id="cli-btn" class="cli-btn">CLI</button>
@@ -162,6 +162,16 @@
       <pre id="license-modal-content" class="license-modal-body"></pre>
       <div class="modal-buttons">
         <button id="license-modal-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert Modal (replaces browser alert) -->
+  <div id="alert-modal" class="modal hidden">
+    <div class="modal-content">
+      <p id="alert-modal-message" class="alert-modal-message"></p>
+      <div class="modal-buttons">
+        <button id="alert-modal-ok">OK</button>
       </div>
     </div>
   </div>

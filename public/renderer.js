@@ -96,6 +96,15 @@ const DEFAULT_IPFS_GATEWAYS = [
 // Maximum file size for skills files (2MB) - reasonable limit for text files
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB in bytes
 
+/** Show a message in the alert modal instead of browser alert(). */
+function showAlertModal(message) {
+  const modal = document.getElementById('alert-modal');
+  const msgEl = document.getElementById('alert-modal-message');
+  if (!modal || !msgEl) return;
+  msgEl.textContent = message;
+  modal.classList.remove('hidden');
+}
+
 /** True if content looks like binary (e.g. image) rather than text. Used to avoid treating binary as a skill. */
 function isLikelyBinaryContent(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength === 0) return false;
@@ -363,6 +372,17 @@ function setupEventListeners() {
   const tagCancel = document.getElementById('tag-cancel');
   const tagInput = document.getElementById('tag-input');
 
+  const alertModal = document.getElementById('alert-modal');
+  const alertModalOk = document.getElementById('alert-modal-ok');
+  if (alertModalOk) {
+    alertModalOk.addEventListener('click', () => alertModal && alertModal.classList.add('hidden'));
+  }
+  if (alertModal) {
+    alertModal.addEventListener('click', (e) => {
+      if (e.target === alertModal) alertModal.classList.add('hidden');
+    });
+  }
+
   loadBtn.addEventListener('click', handleLoad);
   cidInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
@@ -477,7 +497,7 @@ function setupEventListeners() {
       .map((el) => (el.value || '').trim())
       .filter((s) => s.length > 0);
     if (ipfsGateways.length === 0) {
-      alert('At least one IPFS gateway is required.');
+      showAlertModal('At least one IPFS gateway is required.');
       return;
     }
     const folderName = (skillsFolderNameInput.value || '').trim();
@@ -492,7 +512,7 @@ function setupEventListeners() {
       currentSettings = settings;
       optionsModal.classList.add('hidden');
     } else {
-      alert('Error saving settings: ' + result.error);
+      showAlertModal('Error saving settings: ' + result.error);
     }
   });
 
@@ -500,7 +520,7 @@ function setupEventListeners() {
   openSkillsFolderBtn.addEventListener('click', async () => {
     const result = await window.electronAPI.openSkillsFolder();
     if (!result.success) {
-      alert(result.error || 'Could not open skills folder.');
+      showAlertModal(result.error || 'Could not open skills folder.');
     }
   });
 
@@ -557,7 +577,7 @@ const CLI_COMMANDS = [
     id: 'install', label: 'install',
     desc: 'Install by CID/shortname, or from local dsoul.json',
     fields: [
-      { id: 'target', label: 'CID or shortname', type: 'text', placeholder: 'bafy… or shortname (leave empty for dsoul.json)' },
+      { id: 'target', label: 'CID or shortname', type: 'text', placeholder: 'Qm… or shortname (leave empty for dsoul.json)' },
       { id: 'global', label: 'Global (-g)', type: 'checkbox' },
       { id: 'auto', label: 'Auto-pick oldest (-y)', type: 'checkbox' },
     ],
@@ -573,7 +593,7 @@ const CLI_COMMANDS = [
     id: 'uninstall', label: 'uninstall',
     desc: 'Uninstall a skill',
     fields: [
-      { id: 'target', label: 'CID or shortname', type: 'text', placeholder: 'bafy… or shortname', required: true },
+      { id: 'target', label: 'CID or shortname', type: 'text', placeholder: 'Qm… or shortname', required: true },
     ],
     buildArgs(v) { return v.target ? [v.target] : []; },
   },
@@ -870,7 +890,7 @@ async function handleInstall() {
   const cid = currentLoadCid;
   
   if (!verifiedFileContent) {
-    alert('Error: File content not available. Please try loading again.');
+    showAlertModal('Error: File content not available. Please try loading again.');
     return;
   }
 
@@ -898,7 +918,7 @@ async function handleInstall() {
 
     const saveResult = await window.electronAPI.saveFile(fileData, isBundle ? verifiedFileContent : undefined);
     if (!saveResult.success) {
-      alert('Error saving file: ' + saveResult.error);
+      showAlertModal('Error saving file: ' + saveResult.error);
       return;
     }
 
@@ -918,7 +938,7 @@ async function handleInstall() {
     verifiedZipRootFolderName = null;
     pendingDsoulEntry = null;
   } catch (error) {
-    alert('Error installing file: ' + error.message);
+    showAlertModal('Error installing file: ' + error.message);
   } finally {
     loadBtn.disabled = false;
     isLoading = false;
@@ -950,12 +970,8 @@ function parseIPFSPath(input) {
     return cid.trim();
   }
   
-  // Check if it's a valid CID (CIDv0 or CIDv1)
-  // CIDv0: Qm... (46 chars starting with Qm)
-  // CIDv1: bafy..., bafkrei..., etc. (base32/base58 encoded, various lengths)
-  // Also support other CID formats like z... (base58btc)
-  const cidPattern = /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z0-9]{58,}|z[a-z0-9]+)$/i;
-  
+  // CIDv0 only: Qm... (46 chars, base58btc)
+  const cidPattern = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/;
   if (cidPattern.test(trimmed)) {
     return trimmed;
   }
@@ -1061,7 +1077,7 @@ async function handleLoad() {
   const input = cidInput.value.trim();
   
   if (!input) {
-    alert('Please enter an IPFS path (ipfs://...) or CID');
+    showAlertModal('Please enter an IPFS path (ipfs://...) or CID');
     return;
   }
 
@@ -1069,7 +1085,7 @@ async function handleLoad() {
   const cid = parseIPFSPath(input);
   
   if (!cid) {
-    alert('Invalid input. Please enter an IPFS path (ipfs://...) or a valid CID (e.g., Qm... or bafy...)');
+    showAlertModal('Invalid input. Please enter an IPFS path (ipfs://...) or a valid CID (e.g., Qm...)');
     return;
   }
 
@@ -1648,7 +1664,7 @@ function createFileItem(file) {
 async function showFilePreview(cid) {
   const file = await window.electronAPI.readFile(cid);
   if (!file) {
-    alert('File not found');
+    showAlertModal('File not found');
     return;
   }
 
@@ -2111,7 +2127,7 @@ async function handleDeleteFile() {
       currentFile = null;
     }
   } else {
-    alert('Error deleting file: ' + result.error);
+    showAlertModal('Error deleting file: ' + result.error);
   }
 }
 
@@ -2125,7 +2141,7 @@ async function handleAddTag() {
 
   const file = await window.electronAPI.readFile(fileContextMenuCid);
   if (!file) {
-    alert('File not found');
+    showAlertModal('File not found');
     return;
   }
 
@@ -2151,7 +2167,7 @@ async function handleToggleActive() {
 
   const file = await window.electronAPI.readFile(fileContextMenuCid);
   if (!file) {
-    alert('File not found');
+    showAlertModal('File not found');
     return;
   }
 
@@ -2166,7 +2182,7 @@ async function handleToggleActive() {
           currentFile.active = false;
         }
       } else {
-        alert('Error deactivating file: ' + result.error);
+        showAlertModal('Error deactivating file: ' + result.error);
       }
     } else {
       // Activate
@@ -2178,11 +2194,11 @@ async function handleToggleActive() {
           currentFile.active = true;
         }
       } else {
-        alert('Error activating file: ' + result.error);
+        showAlertModal('Error activating file: ' + result.error);
       }
     }
   } catch (error) {
-    alert('Error: ' + error.message);
+    showAlertModal('Error: ' + error.message);
   }
 
   document.getElementById('context-menu').classList.add('hidden');
