@@ -34,6 +34,11 @@ const cmd = `pkg bin/dsoul.js --targets ${config.target} --output ${config.out}`
 console.log(`Building ${platform} v${version} → ${config.out}`);
 execSync(cmd, { stdio: 'inherit', cwd: root });
 
+if (platform === 'win') {
+  console.log('Archiving exe...');
+  execSync(`node scripts/zip-exe.js ${version}`, { stdio: 'inherit', cwd: root });
+}
+
 if (platform === 'linux') {
   console.log('Creating AppImage...');
   const appimagScript = `bash scripts/make-appimage.sh ${version}`;

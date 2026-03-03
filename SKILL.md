@@ -39,8 +39,9 @@ Install a skill by **CID** (e.g. `Qm...`, `b...`, `z...`) or **shortname** (reso
 
 ```bash
 dsoul install <cid-or-shortname>
-dsoul install -g <cid-or-shortname>   # install to global skills folder
-dsoul install -y <cid-or-shortname>   # auto-pick oldest when multiple DSOUL entries exist
+dsoul install -g <cid-or-shortname>       # install to global skills folder
+dsoul install -y <cid-or-shortname>       # auto-pick oldest when multiple DSOUL entries exist
+dsoul install --local <cid-or-shortname>  # install to local project skills folder
 ```
 
 Target can be raw CID, `ipfs://Qm.../...`, or a shortname the provider can resolve.
@@ -85,6 +86,74 @@ dsoul init <directory>
 ```
 
 The directory is created under the current working directory. The directory must not already exist, or must be empty.
+
+If the current working directory (or the target path) is inside a `.cursor` folder structure, `init` will also automatically create a `dsoul-cli` subfolder inside `.cursor/skills/` and deploy the dsoul-cli `SKILL.md` and `LICENSE` there, so the AI assistant has up-to-date documentation on how to use the CLI.
+
+### status
+
+Show current dsoul configuration and authentication status.
+
+```bash
+dsoul status
+```
+
+Prints: CLI version, provider URL, global skills folder, local folder name, and registered credentials (username or "not registered").
+
+### search
+
+Search the DSOUL provider for skills and files. Without a query, displays the provider homepage (recent files, top charts, recent lists).
+
+```bash
+dsoul search <query>
+dsoul search <query> --page=2
+dsoul search <query> -n 5        # limit results shown
+dsoul search                     # show provider homepage
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--page=N` | Page number (default 1) |
+| `-n N` | Limit number of results shown |
+| `--limit=N` | Same as `-n` |
+
+### plugin
+
+Manage bundled plugins (e.g. `dsoul-rehydrate`). Plugins are extracted next to the binary and activated via `npm install`.
+
+```bash
+dsoul plugin list
+dsoul plugin install <name>
+dsoul plugin install <name> -y     # skip confirmation prompt
+dsoul plugin install <name> --force  # reinstall even if already activated
+```
+
+### supercede
+
+Mark a frozen file (by post ID) as superceded by a newer CID. Requires stored credentials.
+
+```bash
+dsoul supercede <post-id> <supercede-cid>
+```
+
+### webstart
+
+Start the dsoul web UI (HTTP server). Runs until interrupted.
+
+```bash
+dsoul webstart
+dsoul webstart <port>   # specify port (default from config)
+```
+
+### version
+
+Print the installed dsoul version.
+
+```bash
+dsoul --version
+dsoul -V
+```
 
 ### package
 

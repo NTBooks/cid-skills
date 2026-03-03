@@ -2,9 +2,61 @@ const path = require('path');
 const fs = require('fs').promises;
 const { loadWpCredentials } = require('../../lib/credentials');
 
+const PKG_ROOT = path.resolve(__dirname, '..', '..');
+
 function buildInitSkillMdContent(authorUsername) {
   const authorLine = typeof authorUsername === 'string' && authorUsername.trim() ? 'author: ' + authorUsername.trim() : 'author: ';
   return ['---', 'name: ', 'description: ', authorLine, '---', '', ''].join('\n');
+}
+
+function findCursorRootFromPath(p) {
+  const normalized = path.resolve(p);
+  const parts = normalized.split(path.sep);
+  const idx = parts.indexOf('.cursor');
+  if (idx >= 0) {
+    const joined = parts.slice(0, idx + 1).join(path.sep);
+    return joined || path.sep;
+  }
+  return null;
+}
+
+async function deployDsoulCliSkill(cursorRoot, ui) {
+  const dsoulCliDir = path.join(cursorRoot, 'skills', 'dsoul-cli');
+
+  const existing = await fs.stat(dsoulCliDir).catch(() => null);
+  if (existing) {
+    ui.dim('  dsoul-cli skill already present at ' + dsoulCliDir);
+    return;
+  }
+
+  const srcSkillMd = path.join(PKG_ROOT, 'SKILL.md');
+  const srcLicense = path.join(PKG_ROOT, 'LICENSE');
+
+  const [skillMdStat, licenseStat] = await Promise.all([
+    fs.stat(srcSkillMd).catch(() => null),
+    fs.stat(srcLicense).catch(() => null),
+  ]);
+
+  if (!skillMdStat || !licenseStat) {
+    ui.dim('  (dsoul-cli skill source not found; skipping auto-deploy)');
+    return;
+  }
+
+  ui.step('Deploying dsoul-cli skill to .cursor/skills/dsoul-cli');
+  await fs.mkdir(dsoulCliDir, { recursive: true });
+
+  const [skillMdContent, licenseContent] = await Promise.all([
+    fs.readFile(srcSkillMd, 'utf-8'),
+    fs.readFile(srcLicense, 'utf-8'),
+  ]);
+
+  await Promise.all([
+    fs.writeFile(path.join(dsoulCliDir, 'SKILL.md'), skillMdContent, 'utf-8'),
+    fs.writeFile(path.join(dsoulCliDir, 'license.txt'), licenseContent, 'utf-8'),
+  ]);
+
+  ui.added('dsoul-cli SKILL.md → ' + dsoulCliDir);
+  ui.added('dsoul-cli license.txt → ' + dsoulCliDir);
 }
 
 async function runCliInit(directoryArg, ui) {
@@ -32,6 +84,12 @@ async function runCliInit(directoryArg, ui) {
     ui.added('skill.md' + (credentials ? ' (author: ' + credentials.username + ')' : ''));
     await fs.writeFile(path.join(resolved, 'license.txt'), 'No License', 'utf-8');
     ui.added('license.txt');
+
+    const cursorRoot = findCursorRootFromPath(resolved) || findCursorRootFromPath(process.cwd());
+    if (cursorRoot) {
+      ui.raw('');
+      await deployDsoulCliSkill(cursorRoot, ui);
+    }
 
     ui.raw('');
     const c = ui.c || {};
