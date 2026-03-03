@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const path = require('path');
+const fs = require('fs');
 const { getVersion } = require('../lib/config');
 const { ensureDataDir, loadSettings } = require('../lib/storage');
 const { getBlocklist, getAllInstalledCids, printBlockedCidsWarning } = require('../lib/blocklist');
@@ -24,16 +25,18 @@ function getCliArgs() {
   if (cmd === 'install') {
     const rest = argv.slice(argIndex);
     const global = rest.includes('-g');
+    const local = rest.includes('--local');
     const yes = rest.includes('-y');
-    const target = rest.find((a) => a !== '-g' && a !== '-y' && !a.startsWith('-'));
-    if (target && String(target).trim()) return { command: 'install', target: String(target).trim(), global, yes };
-    return { command: 'install', fromList: true, global, yes };
+    const target = rest.find((a) => a !== '-g' && a !== '-y' && a !== '--local' && !a.startsWith('-'));
+    if (target && String(target).trim()) return { command: 'install', target: String(target).trim(), global, local, yes };
+    return { command: 'install', fromList: true, global, local, yes };
   }
   if (cmd === 'config') {
     const key = argv[argIndex];
     const value = argv[argIndex + 1];
     const validKeys = ['dsoul-provider', 'skills-folder', 'skills-folder-name'];
-    if (!key || !validKeys.includes(key)) return null;
+    if (!key) return { command: 'config' };
+    if (!validKeys.includes(key)) return null;
     return { command: 'config', key, value: value != null ? String(value).trim() : undefined };
   }
   if (cmd === 'uninstall') {
@@ -74,6 +77,7 @@ function getCliArgs() {
     const yes = rest.includes('-y');
     return { command: 'upgrade', globalOnly, localOnly, yes };
   }
+  if (cmd === 'status') return { command: 'status' };
   if (cmd === 'balance') return { command: 'balance' };
   if (cmd === 'files') {
     const rest = argv.slice(argIndex);
@@ -105,8 +109,7 @@ function getCliArgs() {
     return null;
   }
   if (cmd === 'init') {
-    const directory = (argv[argIndex] || '').trim();
-    if (!directory) return null;
+    const directory = (argv[argIndex] || '').trim() || '.';
     return { command: 'init', directory };
   }
   if (cmd === 'rehydrate') {
@@ -118,16 +121,48 @@ function getCliArgs() {
     if (!contractAddress) return null;
     return { command: 'rehydrate', contractAddress, folder, full };
   }
+  if (cmd === 'plugin') {
+    const sub = argv[argIndex];
+    if (sub === 'list') return { command: 'plugin', subcommand: 'list' };
+    if (sub === 'install') {
+      const target = (argv[argIndex + 1] || '').trim();
+      if (!target) return null;
+      const rest = argv.slice(argIndex + 2);
+      const yes = rest.includes('-y');
+      const force = rest.includes('--force');
+      return { command: 'plugin', subcommand: 'install', target, yes, force };
+    }
+    return null;
+  }
+  if (cmd === 'search') {
+    const rest = argv.slice(argIndex);
+    let page = 1;
+    let limit = null;
+    const nonFlags = [];
+    for (let j = 0; j < rest.length; j++) {
+      const a = rest[j];
+      if (a.startsWith('--page=')) { page = parseInt(a.slice(7), 10) || 1; }
+      else if (a === '-n' && rest[j + 1]) { limit = parseInt(rest[++j], 10) || null; }
+      else if (a.startsWith('--limit=')) { limit = parseInt(a.slice(8), 10) || null; }
+      else if (!a.startsWith('-')) { nonFlags.push(a); }
+    }
+    const query = nonFlags.join(' ').trim();
+    return { command: 'search', query: query || null, page, limit };
+  }
+  return null;
+}
+
+function findPlugin(name) {
+  const { getPluginsDir } = require('../cli/commands/plugin');
+  const pluginsDir = getPluginsDir();
+  const pluginDir = path.join(pluginsDir, name);
+  const indexPath = path.join(pluginDir, 'index.js');
+  const nmPath = path.join(pluginDir, 'node_modules');
+  if (fs.existsSync(indexPath) && fs.existsSync(nmPath)) return indexPath;
   return null;
 }
 
 async function main(ui, cliArgs) {
-  if (!cliArgs && process.argv.length <= 2) {
-    const { getCliHelpText } = require('../cli/commands/help');
-    console.log(getCliHelpText());
-    return true;
-  }
-
   if (!cliArgs) {
     ui.fail('Invalid command. Run dsoul help for usage.');
     return false;
@@ -135,8 +170,22 @@ async function main(ui, cliArgs) {
 
   if (cliArgs.command === 'help') {
     const { getCliHelpText } = require('../cli/commands/help');
+    const { getPluginsDir } = require('../cli/commands/plugin');
     await animateHelpTitle();
-    console.log(getCliHelpText());
+    const pluginHelps = [];
+    try {
+      const pluginsDir = getPluginsDir();
+      const entries = fs.readdirSync(pluginsDir);
+      for (const name of entries) {
+        const pluginPath = findPlugin(name);
+        if (!pluginPath) continue;
+        try {
+          const plugin = require(pluginPath);
+          if (plugin && plugin.help) pluginHelps.push(plugin.help);
+        } catch (_) {}
+      }
+    } catch (_) {}
+    console.log(getCliHelpText(pluginHelps));
     return true;
   }
   if (cliArgs.command === 'version') {
@@ -148,7 +197,8 @@ async function main(ui, cliArgs) {
     try {
       await runWebstart(cliArgs.port, ui);
       return true;
-    } catch (_) {
+    } catch (err) {
+      ui.fail(err.message || String(err));
       return false;
     }
   }
@@ -162,6 +212,10 @@ async function main(ui, cliArgs) {
     const { runCliUnregister } = require('../cli/commands/register');
     const ok = await runCliUnregister(ui);
     return ok;
+  }
+  if (cliArgs.command === 'search') {
+    const { runCliSearch } = require('../cli/commands/search');
+    return await runCliSearch(cliArgs, ui);
   }
 
   let blocklist = null;
@@ -179,6 +233,10 @@ async function main(ui, cliArgs) {
     }
   }
 
+  if (cliArgs.command === 'status') {
+    const { runCliStatus } = require('../cli/commands/status');
+    return await runCliStatus(ui);
+  }
   if (cliArgs.command === 'balance') {
     const { runCliBalance } = require('../cli/commands/balance');
     const ok = await runCliBalance(ui);
@@ -271,10 +329,39 @@ async function main(ui, cliArgs) {
     const ok = await runCliHashCidv0(cliArgs.file, ui);
     return ok;
   }
+  if (cliArgs.command === 'plugin') {
+    const { runCliPlugin } = require('../cli/commands/plugin');
+    return runCliPlugin(cliArgs, ui);
+  }
   if (cliArgs.command === 'rehydrate') {
+    const pluginPath = findPlugin('dsoul-rehydrate');
+    if (!pluginPath) {
+      ui.fail('The rehydrate command requires the dsoul-rehydrate plugin.');
+      ui.info('Activate it with: dsoul plugin install dsoul-rehydrate');
+      return false;
+    }
+    let plugin;
+    try {
+      plugin = require(pluginPath);
+    } catch (err) {
+      ui.fail('Failed to load rehydrate plugin: ' + (err.message || err));
+      return false;
+    }
+    // Pre-load settings and populate env so the plugin's lib/rehydrate code
+    // (which calls loadDotEnv/loadSettings) works without dsoul's modules.
+    const { loadDotEnv } = require('../lib/config');
+    const { loadSettings, DEFAULT_RPC_BASE } = require('../lib/storage');
+    const env = await loadDotEnv();
+    for (const [key, val] of Object.entries(env)) {
+      if (val != null && val !== '') process.env[key] = val;
+    }
+    if (!process.env.RPC_BASE) {
+      const settings = await loadSettings();
+      const fromSettings = (settings.rpcBase && String(settings.rpcBase).trim()) || '';
+      process.env.RPC_BASE = fromSettings || DEFAULT_RPC_BASE;
+    }
     const { runCliRehydrate } = require('../cli/commands/rehydrate');
-    const ok = await runCliRehydrate(cliArgs, ui);
-    return ok;
+    return plugin.run(cliArgs, ui, { runCliRehydrate });
   }
 
   ui.fail('Invalid command. Run dsoul help for usage.');
@@ -282,20 +369,21 @@ async function main(ui, cliArgs) {
 }
 
 async function run() {
-  const cliArgs = getCliArgs();
+  let cliArgs = getCliArgs();
 
   if (!cliArgs && process.argv.length <= 2) {
-    const { getCliHelpText } = require('../cli/commands/help');
-    console.log(getCliHelpText());
-    process.exit(0);
-    return;
+    cliArgs = { command: 'webstart', port: null };
   }
 
-  const useInk = Boolean(process.stdout.isTTY && !process.env.DSOUL_NO_TUI);
+  // webstart is a long-running server process; Ink exits after rendering a stable
+  // component with no pending interactions, which would kill the server. Always
+  // use the console UI for webstart so output is printed directly and not lost.
+  const isWebstart = cliArgs && cliArgs.command === 'webstart';
+  const useInk = !isWebstart && Boolean(process.stdout.isTTY && !process.env.DSOUL_NO_TUI);
   const store = useInk ? createUiStore() : null;
   const ui = useInk ? createUi('ink', (ev) => store.pushEvent(ev)) : createUi('console');
 
-  if (useInk && cliArgs) {
+  if (useInk) {
     try {
       const ink = await import('ink');
       const spinnerMod = await import('ink-spinner');
@@ -310,9 +398,21 @@ async function run() {
 
   try {
     const ok = await main(ui, cliArgs);
+
+    // For webstart, keep the process alive and let the HTTP server
+    // and signal handlers control shutdown instead of forcing an exit here.
+    if (cliArgs && cliArgs.command === 'webstart') {
+      if (!ok) {
+        // If webstart failed to start, exit with a non-zero code.
+        process.exit(1);
+      }
+      return;
+    }
+
     process.exit(ok ? 0 : 1);
   } catch (err) {
     ui.fail('Fatal error: ' + (err.message || err));
+    // For webstart failures we still want a non-zero exit code.
     process.exit(1);
   }
 }

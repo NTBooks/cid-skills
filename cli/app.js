@@ -94,6 +94,8 @@ function createCliRoot(ink, SpinnerComponent) {
         steps.push({ type: 'ok', message: ev.message, key: stepKey++ });
       } else if (ev.type === 'detail') {
         steps.push({ type: 'detail', label: ev.label, value: ev.value, key: stepKey++ });
+      } else if (ev.type === 'raw') {
+        steps.push({ type: 'raw', message: ev.message, key: stepKey++ });
       } else if (ev.type === 'progress') {
         progressById[ev.id] = { current: ev.current, total: ev.total, label: ev.label };
       } else if (ev.type === 'summary') {
@@ -106,7 +108,7 @@ function createCliRoot(ink, SpinnerComponent) {
 
     return e(Box, { flexDirection: 'column' },
       currentStepLabel && !lastError ? e(SpinnerWithLabel, { key: 'spinner', label: currentStepLabel }) : null,
-      steps.length > 0 ? e(Box, { key: 'steps', flexDirection: 'column', marginTop: 1 }, ...steps.slice(-12).map((s) => {
+      steps.length > 0 ? e(Box, { key: 'steps', flexDirection: 'column', marginTop: 1 }, ...steps.map((s) => {
         if (s.type === 'step') return e(Text, { key: s.key, color: 'cyan' }, '→ ' + s.label + (s.detail ? ' ' + s.detail : ''));
         if (s.type === 'header') return e(Text, { key: s.key, bold: true, color: 'cyan' }, s.text);
         if (s.type === 'dim') return e(Text, { key: s.key, color: 'gray' }, s.message);
@@ -115,6 +117,7 @@ function createCliRoot(ink, SpinnerComponent) {
         if (s.type === 'warn') return e(Text, { key: s.key, color: 'yellow' }, '⚠ ' + s.message);
         if (s.type === 'info') return e(Text, { key: s.key, color: 'cyan' }, 'info ' + s.message);
         if (s.type === 'detail') return e(Text, { key: s.key, color: 'gray' }, '  • ' + s.label + ': ' + s.value);
+        if (s.type === 'raw') return e(Text, { key: s.key }, s.message);
         return null;
       })) : null,
       hasProgress ? e(Box, { key: 'progress', flexDirection: 'column', marginTop: 1 }, ...progressEntries.map(([id, p]) => e(ProgressBar, { key: id, current: p.current, total: p.total, label: p.label }))) : null,

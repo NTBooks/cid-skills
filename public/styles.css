@@ -50,6 +50,12 @@ body {
   flex-shrink: 0;
   display: block;
   filter: drop-shadow(0 0 6px rgba(92, 196, 220, 0.35));
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.brand-logo:hover {
+  filter: drop-shadow(0 0 10px rgba(92, 196, 220, 0.7));
 }
 
 #cid-input {
@@ -1018,6 +1024,16 @@ body {
   background-color: #1e3350;
 }
 
+.first-run-banner {
+  background: #1a3a2a;
+  border: 1px solid #2a6a4a;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: #7fffd4;
+  font-size: 14px;
+}
+
 .options-section {
   margin-bottom: 20px;
 }
@@ -1471,3 +1487,270 @@ body {
 .cli-line.info { color: #5a8aaa; font-style: italic; }
 .cli-line.success { color: #5bc8e0; font-style: italic; }
 .cli-line.failure { color: #f48771; font-style: italic; }
+
+/* ── Plugins Panel ─────────────────────────────────────── */
+
+.plugins-btn {
+  padding: 8px 16px;
+  background-color: #162438;
+  border: 1px solid #1d3a5a;
+  border-radius: 4px;
+  color: #c8dff0;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.plugins-btn:hover { background-color: #1e3350; }
+
+.plugins-btn.active {
+  background-color: #1a7aba;
+  border-color: #1a7aba;
+  color: white;
+}
+
+.plugins-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  background-color: #0c1827;
+}
+
+.plugins-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #1d3a5a;
+  background: linear-gradient(180deg, #0e1f32 0%, #111e30 100%);
+  flex-shrink: 0;
+}
+
+.plugins-panel-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5a8aaa;
+}
+
+.plugins-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.plugins-dir-label {
+  font-size: 11px;
+  color: #3a5a78;
+  font-family: 'Consolas', 'Monaco', monospace;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugins-refresh-btn {
+  padding: 5px 12px;
+  background-color: #162438;
+  border: 1px solid #1d3a5a;
+  border-radius: 4px;
+  color: #c8dff0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.plugins-refresh-btn:hover { background-color: #1e3350; }
+
+.plugins-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.plugins-list {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plugins-loading,
+.plugins-empty,
+.plugins-error {
+  padding: 24px;
+  color: #5a8aaa;
+  font-size: 14px;
+  text-align: center;
+}
+
+.plugins-error { color: #f48771; }
+
+.plugin-card {
+  background: linear-gradient(160deg, #0e2038 0%, #111e30 100%);
+  border: 1px solid #1d3a5a;
+  border-radius: 6px;
+  padding: 16px 18px;
+  max-width: 600px;
+  transition: border-color 0.15s;
+}
+
+.plugin-card:hover { border-color: #2a5580; }
+
+.plugin-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.plugin-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #5bc8e0;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.plugin-version {
+  font-size: 11px;
+  color: #3a5a78;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.plugin-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.plugin-status-active {
+  background-color: rgba(78, 201, 176, 0.15);
+  color: #4ec9b0;
+  border: 1px solid rgba(78, 201, 176, 0.3);
+}
+
+.plugin-status-inactive {
+  background-color: rgba(180, 140, 40, 0.15);
+  color: #c4a040;
+  border: 1px solid rgba(180, 140, 40, 0.3);
+}
+
+.plugin-description {
+  font-size: 13px;
+  color: #7aabcc;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.plugin-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.plugin-install-btn {
+  padding: 6px 16px;
+  background: linear-gradient(135deg, #1a7aba 0%, #1d8fd4 100%);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.plugin-install-btn:hover {
+  background: linear-gradient(135deg, #1d8fd4 0%, #22a0e8 100%);
+}
+
+.plugin-reinstall-btn {
+  background: linear-gradient(135deg, #1e3350 0%, #253f60 100%);
+  border: 1px solid #2a5580;
+}
+
+.plugin-reinstall-btn:hover {
+  background: linear-gradient(135deg, #253f60 0%, #2d4d70 100%);
+}
+
+.plugins-console-wrap {
+  border-top: 1px solid #1d3a5a;
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  flex-shrink: 0;
+}
+
+.plugins-console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background-color: #111e30;
+  border-bottom: 1px solid #1d3a5a;
+  flex-shrink: 0;
+}
+
+.plugins-console-title {
+  font-size: 12px;
+  color: #5a8aaa;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.plugins-console-clear-btn {
+  padding: 3px 10px;
+  background-color: #162438;
+  border: 1px solid #1d3a5a;
+  border-radius: 4px;
+  color: #c8dff0;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.plugins-console-clear-btn:hover { background-color: #1e3350; }
+
+.plugins-console {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  background-color: #060e18;
+  color: #c8dff0;
+}
+
+.plugins-npm-warning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  background-color: #2a1a00;
+  border-bottom: 1px solid #6b3f00;
+  color: #f0a040;
+  font-size: 13px;
+}
+
+.plugins-npm-download-btn {
+  display: inline-block;
+  padding: 4px 12px;
+  background-color: #1a3a5c;
+  color: #7ec8e3;
+  border: 1px solid #2a5580;
+  border-radius: 4px;
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s;
+}
+
+.plugins-npm-download-btn:hover {
+  background-color: #1e4468;
+  color: #a8ddf0;
+}

@@ -49,6 +49,8 @@ window.electronAPI = {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ buffer: base64 })
     }).then(r => r.json());
   },
+  getPlugins: () => fetch('/api/plugins').then(r => r.json()),
+  getPluginsInstallerStatus: () => fetch('/api/plugins/installer-status').then(r => r.json()),
   execCommand: async function* (command, args) {
     let resp;
     try {
@@ -247,6 +249,20 @@ let currentFile = null;
 let fileContextMenuCid = null;
 let currentSettings = null;
 
+// SPA page routing
+let currentPage = 'home';
+const pageOnEnter = {};
+
+function showPage(pageId) {
+  currentPage = pageId;
+  document.querySelector('.main-content').classList.toggle('hidden', pageId !== 'home');
+  document.getElementById('cli-panel').classList.toggle('hidden', pageId !== 'cli');
+  document.getElementById('plugins-panel').classList.toggle('hidden', pageId !== 'plugins');
+  document.getElementById('cli-btn').classList.toggle('active', pageId === 'cli');
+  document.getElementById('plugins-btn').classList.toggle('active', pageId === 'plugins');
+  if (pageOnEnter[pageId]) pageOnEnter[pageId]();
+}
+
 function normalizePathForCompare(p) {
   return (p || '').replace(/\\/g, '/').trim().toLowerCase();
 }
@@ -327,6 +343,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
   await loadFileTree();
   setupEventListeners();
+
+  // First-run: if no provider or skills folder configured, auto-open Options with welcome banner
+  if (!currentSettings?.dsoulProviderUrl && !currentSettings?.skillsFolder) {
+    const banner = document.getElementById('first-run-banner');
+    if (banner) banner.classList.remove('hidden');
+    document.getElementById('options-btn').click();
+  }
   
   // Set up global observer to fix CLVerify images as they're added to the DOM
   const globalObserver = new MutationObserver((mutations) => {
@@ -361,7 +384,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   setTimeout(() => fixCLVerifyImages(document), 500);
 });
 
+function goHome() {
+  showPage('home');
+  document.getElementById('loading-panel').classList.add('hidden');
+  document.getElementById('file-preview').classList.add('hidden');
+  document.getElementById('empty-state').classList.remove('hidden');
+  document.getElementById('cid-input').value = '';
+  currentFile = null;
+}
+
 function setupEventListeners() {
+  document.getElementById('brand-logo').addEventListener('click', goHome);
+
   const loadBtn = document.getElementById('load-btn');
   const cidInput = document.getElementById('cid-input');
   const reverifyBtn = document.getElementById('reverify-btn');
@@ -492,6 +526,8 @@ function setupEventListeners() {
 
   optionsCancel.addEventListener('click', () => {
     optionsModal.classList.add('hidden');
+    const banner = document.getElementById('first-run-banner');
+    if (banner) banner.classList.add('hidden');
   });
 
   optionsSave.addEventListener('click', async () => {
@@ -515,6 +551,8 @@ function setupEventListeners() {
     if (result.success) {
       currentSettings = settings;
       optionsModal.classList.add('hidden');
+      const banner = document.getElementById('first-run-banner');
+      if (banner) banner.classList.add('hidden');
     } else {
       showAlertModal('Error saving settings: ' + result.error);
     }
@@ -601,6 +639,7 @@ function setupEventListeners() {
   });
 
   setupCliPanel();
+  setupPluginsPanel();
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +701,22 @@ const CLI_COMMANDS = [
       if (v.global) a.push('-g');
       if (v.local) a.push('--local');
       if (v.auto) a.push('-y');
+      return a;
+    },
+  },
+  {
+    id: 'search', label: 'search',
+    desc: 'Search the DSOUL registry for skills',
+    fields: [
+      { id: 'query', label: 'Query', type: 'text', placeholder: 'search terms (leave empty to list all)' },
+      { id: 'page', label: 'Page', type: 'text', placeholder: '1' },
+      { id: 'limit', label: 'Limit (-n)', type: 'text', placeholder: 'max results (optional)' },
+    ],
+    buildArgs(v) {
+      const a = [];
+      if (v.query && v.query.trim()) a.push(v.query.trim());
+      if (v.page && v.page !== '1') a.push('--page=' + v.page);
+      if (v.limit) a.push('-n', v.limit);
       return a;
     },
   },
@@ -762,18 +817,52 @@ const CLI_COMMANDS = [
       return a;
     },
   },
+  {
+    id: 'rehydrate', label: 'rehydrate',
+    desc: 'Fetch MappingUpdated event history for a smart contract (requires dsoul-rehydrate plugin)',
+    fields: [
+      { id: 'contractAddress', label: 'Contract address', type: 'text', placeholder: '0x…', required: true },
+      { id: 'folder', label: 'Output folder', type: 'text', placeholder: 'data (default)' },
+      { id: 'full', label: 'Full history (--full)', type: 'checkbox' },
+    ],
+    buildArgs(v) {
+      const a = [];
+      if (v.contractAddress) a.push(v.contractAddress);
+      if (v.folder && v.folder.trim() && v.folder.trim() !== 'data') a.push(v.folder.trim());
+      if (v.full) a.push('--full');
+      return a;
+    },
+  },
+  {
+    id: 'plugin-list', command: 'plugin', label: 'plugin list',
+    desc: 'List installed plugins and their activation status',
+    fields: [],
+    buildArgs() { return ['list']; },
+  },
+  {
+    id: 'plugin-install', command: 'plugin', label: 'plugin install',
+    desc: 'Install a bundled plugin (use the Plugins panel for a visual interface)',
+    fields: [
+      { id: 'target', label: 'Plugin name', type: 'text', placeholder: 'dsoul-rehydrate', required: true },
+      { id: 'force', label: 'Force reinstall (--force)', type: 'checkbox' },
+    ],
+    buildArgs(v) {
+      const a = ['install'];
+      if (v.target) a.push(v.target);
+      a.push('-y');
+      if (v.force) a.push('--force');
+      return a;
+    },
+  },
 ];
 
 function setupCliPanel() {
   const cliBtn = document.getElementById('cli-btn');
-  const cliPanel = document.getElementById('cli-panel');
-  const mainContent = document.querySelector('.main-content');
   const cliSidebar = document.getElementById('cli-sidebar');
   const cliFormArea = document.getElementById('cli-form-area');
   const cliConsole = document.getElementById('cli-console');
   const cliClearBtn = document.getElementById('cli-clear-btn');
 
-  let cliOpen = false;
   let selectedCmd = CLI_COMMANDS[0];
   let running = false;
 
@@ -882,7 +971,7 @@ function setupCliPanel() {
     appendLine('> ' + cmdDisplay, 'info');
 
     try {
-      for await (const event of window.electronAPI.execCommand(selectedCmd.id, args)) {
+      for await (const event of window.electronAPI.execCommand(selectedCmd.command || selectedCmd.id, args)) {
         if (event.type === 'out') { if (event.data !== '') appendLine(event.data, 'out'); }
         else if (event.type === 'err') { if (event.data !== '') appendLine(event.data, 'err'); }
         else if (event.type === 'exit') {
@@ -899,14 +988,152 @@ function setupCliPanel() {
 
   cliClearBtn.addEventListener('click', () => { cliConsole.innerHTML = ''; });
 
+  pageOnEnter['cli'] = () => {
+    if (!cliFormArea.hasChildNodes()) selectCommand(selectedCmd);
+  };
+
   cliBtn.addEventListener('click', () => {
-    cliOpen = !cliOpen;
-    cliBtn.classList.toggle('active', cliOpen);
-    cliPanel.classList.toggle('hidden', !cliOpen);
-    mainContent.classList.toggle('hidden', cliOpen);
-    if (cliOpen && !cliFormArea.hasChildNodes()) {
-      selectCommand(selectedCmd);
+    showPage(currentPage === 'cli' ? 'home' : 'cli');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Plugins panel
+// ---------------------------------------------------------------------------
+
+function setupPluginsPanel() {
+  const pluginsBtn = document.getElementById('plugins-btn');
+  const pluginsPanel = document.getElementById('plugins-panel');
+  const pluginsList = document.getElementById('plugins-list');
+  const pluginsConsoleWrap = document.getElementById('plugins-console-wrap');
+  const pluginsConsole = document.getElementById('plugins-console');
+  const pluginsDirLabel = document.getElementById('plugins-dir-label');
+  const pluginsRefreshBtn = document.getElementById('plugins-refresh-btn');
+  const pluginsConsoleClearBtn = document.getElementById('plugins-console-clear-btn');
+  const pluginsNpmWarning = document.getElementById('plugins-npm-warning');
+
+  if (!pluginsBtn || !pluginsPanel) return;
+
+  let installing = false;
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function appendPluginsLine(text, cls) {
+    const span = document.createElement('span');
+    span.className = 'cli-line ' + cls;
+    span.textContent = text;
+    pluginsConsole.appendChild(span);
+    pluginsConsole.scrollTop = pluginsConsole.scrollHeight;
+  }
+
+  function renderPlugins(plugins) {
+    pluginsList.innerHTML = '';
+    if (plugins.length === 0) {
+      pluginsList.innerHTML = '<div class="plugins-empty">No plugins available.</div>';
+      return;
     }
+    for (const plugin of plugins) {
+      const card = document.createElement('div');
+      card.className = 'plugin-card';
+      const statusCls = plugin.activated ? 'plugin-status-active' : 'plugin-status-inactive';
+      const statusText = plugin.activated ? 'Activated' : 'Not installed';
+      const installLabel = plugin.activated ? 'Reinstall' : 'Install';
+      card.innerHTML = `
+        <div class="plugin-card-header">
+          <span class="plugin-name">${escapeHtml(plugin.name)}</span>
+          <span class="plugin-version">v${escapeHtml(plugin.version)}</span>
+          <span class="plugin-status-badge ${statusCls}">${statusText}</span>
+        </div>
+        <div class="plugin-description">${escapeHtml(plugin.description || '')}</div>
+        <div class="plugin-actions">
+          <button class="plugin-install-btn${plugin.activated ? ' plugin-reinstall-btn' : ''}"
+            data-name="${escapeHtml(plugin.name)}"
+            data-activated="${plugin.activated ? '1' : ''}">
+            ${installLabel}
+          </button>
+        </div>
+      `;
+      card.querySelector('.plugin-install-btn').addEventListener('click', (e) => {
+        const name = e.currentTarget.dataset.name;
+        const activated = e.currentTarget.dataset.activated === '1';
+        handlePluginInstall(name, activated);
+      });
+      pluginsList.appendChild(card);
+    }
+  }
+
+  async function loadPlugins() {
+    pluginsList.innerHTML = '<div class="plugins-loading">Loading…</div>';
+    try {
+      const [result, installerStatus] = await Promise.all([
+        window.electronAPI.getPlugins(),
+        window.electronAPI.getPluginsInstallerStatus().catch(() => ({ available: true })),
+      ]);
+
+      if (pluginsNpmWarning) {
+        if (!installerStatus.available) {
+          pluginsNpmWarning.classList.remove('hidden');
+        } else {
+          pluginsNpmWarning.classList.add('hidden');
+        }
+      }
+
+      if (!result.success) {
+        pluginsList.innerHTML = `<div class="plugins-error">Failed to load plugins: ${escapeHtml(result.error || 'Unknown error')}</div>`;
+        return;
+      }
+      if (pluginsDirLabel) pluginsDirLabel.textContent = result.pluginsDir || '';
+      renderPlugins(result.plugins || []);
+    } catch (err) {
+      pluginsList.innerHTML = `<div class="plugins-error">Error: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  async function handlePluginInstall(name, alreadyActivated) {
+    if (installing) {
+      showAlertModal('An install is already in progress.');
+      return;
+    }
+    const action = alreadyActivated ? 'Reinstall' : 'Install';
+    if (!confirm(`${action} plugin "${name}"?\n\nThis will run npm/bun install and may take a moment.`)) return;
+
+    pluginsConsoleWrap.classList.remove('hidden');
+    pluginsConsole.innerHTML = '';
+    installing = true;
+
+    const args = ['install', name, '-y'];
+    if (alreadyActivated) args.push('--force');
+
+    const cmdStr = 'dsoul plugin ' + args.join(' ');
+    appendPluginsLine('> ' + cmdStr, 'info');
+
+    try {
+      for await (const event of window.electronAPI.execCommand('plugin', args)) {
+        if (event.type === 'out') { if (event.data !== '') appendPluginsLine(event.data, 'out'); }
+        else if (event.type === 'err') { if (event.data !== '') appendPluginsLine(event.data, 'err'); }
+        else if (event.type === 'exit') {
+          appendPluginsLine('exited ' + event.code, event.code === 0 ? 'success' : 'failure');
+          if (event.code === 0) await loadPlugins();
+        }
+      }
+    } catch (err) {
+      appendPluginsLine('Error: ' + err.message, 'err');
+    } finally {
+      installing = false;
+    }
+  }
+
+  if (pluginsRefreshBtn) pluginsRefreshBtn.addEventListener('click', loadPlugins);
+  if (pluginsConsoleClearBtn) pluginsConsoleClearBtn.addEventListener('click', () => { pluginsConsole.innerHTML = ''; });
+
+  pageOnEnter['plugins'] = () => loadPlugins();
+
+  pluginsBtn.addEventListener('click', () => {
+    showPage(currentPage === 'plugins' ? 'home' : 'plugins');
   });
 }
 

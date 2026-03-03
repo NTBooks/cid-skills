@@ -2,9 +2,20 @@ const { loadSettings, saveSettings } = require('../../lib/storage');
 
 async function runCliConfig(key, value, ui) {
   const keyToSetting = { 'dsoul-provider': 'dsoulProviderUrl', 'skills-folder': 'skillsFolder', 'skills-folder-name': 'skillsFolderName' };
+  const settings = await loadSettings();
+
+  if (!key) {
+    ui.header('Current config');
+    for (const [k, sk] of Object.entries(keyToSetting)) {
+      const v = settings[sk] || '';
+      if (v) { const c = ui.c || {}; ui.detail(k, (c.cyan || '') + v + (c.reset || '')); }
+      else { ui.dim(k + ': (not set)'); }
+    }
+    return true;
+  }
+
   const settingKey = keyToSetting[key];
   if (!settingKey) { ui.fail('Unknown config key: ' + key); return false; }
-  const settings = await loadSettings();
   if (value !== undefined) {
     settings[settingKey] = value;
     const result = await saveSettings(settings);

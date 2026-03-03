@@ -11,10 +11,14 @@
     "dev": "node bin/dsoul.js webstart",
     "test": "node scripts/test-cli.js",
     "test:cli": "node scripts/test-cli.js",
-    "dist:win": "npx pkg bin/dsoul.js --targets node18-win-x64 --output dist/dsoul-win.exe",
-    "dist:mac": "npx pkg bin/dsoul.js --targets node18-macos-x64,node18-macos-arm64 --output dist/dsoul-mac",
-    "dist:wsl": "npx pkg bin/dsoul.js --targets node18-linux-x64 --output dist/dsoul-linux",
+    "dist:win": "node scripts/pkg-build.js win",
+    "dist:mac": "node scripts/pkg-build.js mac",
+    "dist:wsl": "node scripts/pkg-build.js linux",
     "dist": "npm run dist:win && npm run dist:mac && npm run dist:wsl",
+    "dist:bun-win": "bun build --compile --target=bun-windows-x64 bin/dsoul.js --outfile dist/dsoul-bun.exe",
+    "dist:bun-mac": "bun build --compile --target=bun-darwin-arm64 bin/dsoul.js --outfile dist/dsoul-bun-mac",
+    "dist:bun-linux": "bun build --compile --target=bun-linux-x64 bin/dsoul.js --outfile dist/dsoul-bun",
+    "dist:bun": "npm run dist:bun-win && npm run dist:bun-mac && npm run dist:bun-linux",
     "postdist:win": "node scripts/copy-prebuilds.js",
     "postdist": "node scripts/copy-prebuilds.js && node scripts/cleanup-dist.js",
     "prepdeploy": "node scripts/prepdeploy.js"
@@ -22,17 +26,15 @@
   "pkg": {
     "assets": [
       "package.json",
-      "public/**/*",
       "node_modules/**/*.wasm",
       "node_modules/**/*.json",
-      "node_modules/viem/**/*"
+      "packages/bundles.js"
     ],
     "scripts": [
       "bin/**/*.js",
       "cli/**/*.js",
       "lib/**/*.js",
-      "server/**/*.js",
-      "node_modules/viem/**/*.js"
+      "server/**/*.js"
     ]
   },
   "keywords": [
@@ -43,8 +45,20 @@
   ],
   "author": "Nick <nick@chainletter.io>",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "cli/",
+    "lib/",
+    "server/",
+    "public/",
+    "LICENSE"
+  ],
   "dependencies": {
     "archiver": "^7.0.1",
+    "bun": "^1.3.10",
     "diff": "^5.2.0",
     "express": "^4.21.2",
     "form-data": "^4.0.5",
@@ -53,10 +67,12 @@
     "ipfs-only-hash": "^2.0.1",
     "open": "^10.1.0",
     "react": "^18.3.1",
-    "viem": "^2.0.0",
     "yauzl": "^2.10.0"
   },
+  "optionalDependencies": {
+    "viem": "^2.0.0"
+  },
   "devDependencies": {
-    "pkg": "^5.8.1"
+    "@yao-pkg/pkg": "^5.16.1"
   }
 }

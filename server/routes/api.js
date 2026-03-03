@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs').promises;
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const diff = require('diff');
 const { getFilesDir } = require('../../lib/config');
@@ -299,11 +299,76 @@ router.post('/open-skills-folder', async (_req, res) => {
   }
 });
 
+// GET /api/plugins — list available (bundled) plugins and their install status
+router.get('/plugins', async (_req, res) => {
+  try {
+    const { getPluginsDir, listBundledPluginNames } = require('../../cli/commands/plugin');
+    const packagesDir = path.resolve(__dirname, '..', '..', 'packages');
+    const pluginsDir = getPluginsDir();
+
+    const seen = new Set();
+    const plugins = [];
+
+    let pluginBundles = {};
+    try { pluginBundles = require('../../packages/bundles'); } catch (_) {}
+
+    const bundled = listBundledPluginNames();
+
+    for (const name of bundled) {
+      seen.add(name);
+      const meta = pluginBundles[name] || {};
+      let version = meta.version || '?';
+      let description = meta.description || '';
+      if (!meta.version) {
+        try {
+          const pkg = JSON.parse(await fs.readFile(path.join(packagesDir, name, 'package.json'), 'utf8'));
+          version = pkg.version || '?';
+          description = pkg.description || '';
+        } catch (_) {}
+      }
+      let activated = false;
+      try { await fs.access(path.join(pluginsDir, name, 'node_modules')); activated = true; } catch (_) {}
+      plugins.push({ name, version, description, activated, bundled: true });
+    }
+
+    let installed = [];
+    try {
+      installed = (await fs.readdir(pluginsDir, { withFileTypes: true }))
+        .filter(e => e.isDirectory()).map(e => e.name);
+    } catch (_) {}
+
+    for (const name of installed) {
+      if (seen.has(name)) continue;
+      let version = '?', description = '';
+      try {
+        const pkg = JSON.parse(await fs.readFile(path.join(pluginsDir, name, 'package.json'), 'utf8'));
+        version = pkg.version || '?';
+        description = pkg.description || '';
+      } catch (_) {}
+      plugins.push({ name, version, description, activated: true, bundled: false });
+    }
+
+    res.json({ success: true, plugins, pluginsDir });
+  } catch (err) {
+    res.json({ success: false, error: err.message, plugins: [], pluginsDir: '' });
+  }
+});
+
+// GET /api/plugins/installer-status — check whether npm or bun is available
+router.get('/plugins/installer-status', (_req, res) => {
+  for (const cmd of ['bun', 'npm']) {
+    const r = spawnSync(cmd, ['--version'], { stdio: 'pipe', shell: process.platform === 'win32' });
+    if (!r.error && r.status === 0) return res.json({ available: true, installer: cmd });
+  }
+  res.json({ available: false, installer: null });
+});
+
 // POST /api/exec — stream CLI command output as NDJSON
 const EXEC_ALLOWED = new Set([
   'install', 'uninstall', 'update', 'upgrade', 'init',
   'package', 'hash', 'freeze', 'balance', 'files',
   'register', 'unregister', 'config',
+  'rehydrate', 'plugin',
 ]);
 
 function stripAnsi(str) {

@@ -1,0 +1,15 @@
+{
+  "name": "dsoul-rehydrate",
+  "version": "0.1.0",
+  "description": "Rehydrate plugin for dsoul — fetch MappingUpdated events and download IPFS files via blockchain RPC",
+  "main": "index.js",
+  "keywords": ["dsoul", "ipfs", "rehydrate", "blockchain"],
+  "author": "Nick <nick@chainletter.io>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "viem": "^2.0.0"
+  }
+}

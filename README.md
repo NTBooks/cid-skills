@@ -1,6 +1,6 @@
 # Diamond Soul Downloader
 
-An Electron application for viewing and managing IPFS files by CID (Content Identifier). The app downloads files from multiple IPFS gateways, verifies their integrity, and allows you to organize them with tags.
+A CLI tool and local web UI for installing, managing, and publishing AI skills via IPFS. Skills are markdown files fetched from IPFS gateways, verified by CID, and installed into a local folder where AI agents (Cursor, Claude, VS Code) can read them.
 
 ## Features
 
@@ -106,57 +106,55 @@ npm install -g /path/to/cid-skills
 npx diamond-soul-downloader install <cid-or-shortname>
 ```
 
-**Option 4: Run the built app with arguments**
+**Option 4: Run the built exe with arguments**
 
-If you use the packaged app (e.g. **DSoul.exe** on Windows), you can pass CLI arguments directly:
-
-```bash
-DSoul.exe install <cid-or-shortname>
-```
-
-**Option 5: Add the Windows .exe to PATH (no npm)**
-
-If you use the built Windows app and don’t use npm, you can run the CLI from any folder by adding the app’s folder to your PATH:
-
-1. Build the app (e.g. run `npm run dist:win` or download a release). The executable is **DSoul.exe**.
-2. Note the folder that contains the .exe (e.g. `C:\Program Files\DSoul` if installed via the NSIS installer, or your project’s `dist\win-unpacked` folder if you only unpacked).
-3. Add that folder to your PATH:
-   - Open **Settings** → **System** → **About** → **Advanced system settings** (or search “environment variables”).
-   - Click **Environment Variables**.
-   - Under **User variables** or **System variables**, select **Path** → **Edit** → **New**, then paste the folder path (e.g. `C:\Program Files\DSoul`).
-   - Confirm with **OK**.
-4. Open a **new** Command Prompt or PowerShell and run:
+If you use the packaged app (e.g. **dsoul.exe** on Windows), you can pass CLI arguments directly:
 
 ```bash
-DSoul.exe install <cid-or-shortname>
+dsoul.exe install <cid-or-shortname>
 ```
 
-You can also create a short alias (e.g. `dsoul.cmd` that runs the exe with the same arguments) and put that script in a folder already on your PATH.
+**Option 5: Add dsoul.exe to PATH (no npm) — Windows**
 
-**Option 6: Run the built app from Terminal on macOS (no npm)**
+If you downloaded `dsoul.exe` and don’t use npm, you can make it available globally.
 
-If you use the built Mac app (`.app` bundle) and don’t use npm, you can run the CLI from Terminal:
+**Quick setup (PowerShell, run as Administrator):**
 
-1. Build the app (e.g. run `npm run dist:mac` or download a release). The app is **Diamond Soul Downloader.app**.
-2. The executable inside the bundle is at **Diamond Soul Downloader.app/Contents/MacOS/Diamond Soul Downloader**. Run it with a full path, for example if the app is in Applications:
+```powershell
+$dir = “C:\Program Files\dsoul”
+New-Item -ItemType Directory -Force -Path $dir
+Copy-Item .\dsoul.exe “$dir\dsoul.exe”
+[Environment]::SetEnvironmentVariable(“Path”, $env:Path + “;$dir”, [System.EnvironmentVariableTarget]::Machine)
+```
+
+Open a new terminal and run `dsoul` — it should work from any directory.
+
+**Manual setup (GUI):**
+
+1. Move `dsoul.exe` to a permanent folder (e.g. `C:\Program Files\dsoul\`).
+2. Open **Settings** → **System** → **About** → **Advanced system settings** (or search “environment variables”).
+3. Click **Environment Variables**.
+4. Under **User variables** or **System variables**, select **Path** → **Edit** → **New**, then paste the folder path (e.g. `C:\Program Files\dsoul`).
+5. Confirm with **OK**, then open a new terminal and run `dsoul`.
+
+**Option 6: Add dsoul to PATH on macOS/Linux (no npm)**
+
+If you downloaded the pre-built binary and don’t use npm:
 
 ```bash
-"/Applications/Diamond Soul Downloader.app/Contents/MacOS/Diamond Soul Downloader" install <cid-or-shortname>
+# macOS (place the binary in /usr/local/bin as ‘dsoul’)
+sudo cp dsoul-mac-x64 /usr/local/bin/dsoul   # Intel
+# or
+sudo cp dsoul-mac-arm64 /usr/local/bin/dsoul  # Apple Silicon
+
+chmod +x /usr/local/bin/dsoul
+
+# Linux
+sudo cp dsoul /usr/local/bin/dsoul
+chmod +x /usr/local/bin/dsoul
 ```
 
-3. To run it from any directory without typing the full path, create a symlink (e.g. as `dsoul`) in a folder that’s on your PATH (e.g. `/usr/local/bin`):
-
-```bash
-sudo ln -s "/Applications/Diamond Soul Downloader.app/Contents/MacOS/Diamond Soul Downloader" /usr/local/bin/dsoul
-```
-
-Then open a new Terminal and run:
-
-```bash
-dsoul install <cid-or-shortname>
-```
-
-If `/usr/local/bin` doesn’t exist, run `sudo mkdir -p /usr/local/bin`. If it isn’t in your PATH, add `export PATH="/usr/local/bin:$PATH"` to `~/.zshrc` (or `~/.bash_profile` on older Macs) and open a new Terminal.
+If `/usr/local/bin` isn’t in your PATH, add `export PATH="/usr/local/bin:$PATH"` to `~/.zshrc` (or `~/.bash_profile`) and open a new terminal.
 
 ### Commands
 
@@ -346,6 +344,26 @@ dsoul install -g QmXoypiz...
 # Auto-pick oldest entry when multiple exist (no prompt)
 dsoul install -y user@project:v1
 dsoul install -g -y QmXoypiz...
+```
+
+### The `dsoul.json` manifest
+
+When you run `dsoul install` in a project folder, dsoul creates (or updates) `skills/dsoul.json` (or `<skills-folder-name>/dsoul.json`). This file tracks the CIDs and shortnames of every skill installed in that project — similar to `package.json` in npm or `Gemfile.lock` in Bundler.
+
+**You should commit `dsoul.json` to version control.** When a teammate clones your repo, they can reproduce the exact set of skills by running:
+
+```bash
+dsoul install   # reads dsoul.json and installs all listed skills
+```
+
+The file is plain JSON and human-readable:
+
+```json
+{
+  "skills": [
+    { "cid": "QmXoypiz...", "shortname": "user@project:v1" }
+  ]
+}
 ```
 
 ### Configuration

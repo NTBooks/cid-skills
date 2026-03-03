@@ -6,6 +6,9 @@ yarn-error.log*
 
 # Build outputs
 dist/
+server/static.js
+packages/bundles.js
+packages/*/node_modules
 build/
 out/
 *.app
