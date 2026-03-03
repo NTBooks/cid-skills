@@ -11,24 +11,28 @@
     "dev": "node bin/dsoul.js webstart",
     "test": "node scripts/test-cli.js",
     "test:cli": "node scripts/test-cli.js",
-    "dist:win": "pkg bin/dsoul.js --targets node20-win-x64 --output dist/dsoul-win.exe",
-    "dist:mac": "pkg bin/dsoul.js --targets node20-macos-x64,node20-macos-arm64 --output dist/dsoul-mac",
-    "dist:wsl": "pkg bin/dsoul.js --targets node20-linux-x64 --output dist/dsoul-linux",
+    "dist:win": "npx pkg bin/dsoul.js --targets node18-win-x64 --output dist/dsoul-win.exe",
+    "dist:mac": "npx pkg bin/dsoul.js --targets node18-macos-x64,node18-macos-arm64 --output dist/dsoul-mac",
+    "dist:wsl": "npx pkg bin/dsoul.js --targets node18-linux-x64 --output dist/dsoul-linux",
     "dist": "npm run dist:win && npm run dist:mac && npm run dist:wsl",
-    "postdist": "node scripts/cleanup-dist.js",
+    "postdist:win": "node scripts/copy-prebuilds.js",
+    "postdist": "node scripts/copy-prebuilds.js && node scripts/cleanup-dist.js",
     "prepdeploy": "node scripts/prepdeploy.js"
   },
   "pkg": {
     "assets": [
+      "package.json",
       "public/**/*",
       "node_modules/**/*.wasm",
-      "node_modules/**/*.json"
+      "node_modules/**/*.json",
+      "node_modules/viem/**/*"
     ],
     "scripts": [
       "bin/**/*.js",
       "cli/**/*.js",
       "lib/**/*.js",
-      "server/**/*.js"
+      "server/**/*.js",
+      "node_modules/viem/**/*.js"
     ]
   },
   "keywords": [
@@ -53,6 +57,6 @@
     "yauzl": "^2.10.0"
   },
   "devDependencies": {
-    "@vercel/pkg": "^5.8.1"
+    "pkg": "^5.8.1"
   }
 }

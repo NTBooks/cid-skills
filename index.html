@@ -135,6 +135,11 @@
         <p class="options-help">Host only (e.g. https://dsoul.org). The path /wp-json/diamond-soul/v1 is added by the app. Leave empty to use .env or default.</p>
       </div>
       <div class="options-section">
+        <label for="rpc-base-input">RPC Base (rehydrate):</label>
+        <input type="text" id="rpc-base-input" class="rpc-base-input" placeholder="Comma-separated Base RPC URLs" autocomplete="url" />
+        <p class="options-help">Comma-separated RPC URLs used by the rehydrate command. Highest priority: .env RPC_BASE, then this setting, then app default.</p>
+      </div>
+      <div class="options-section">
         <label>IPFS gateways:</label>
         <p class="options-help">URLs used to download content by CID. At least one required. With one gateway, multi-source comparison is skipped.</p>
         <div id="ipfs-gateways-list" class="ipfs-gateways-list"></div>

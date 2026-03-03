@@ -325,6 +325,7 @@ function setupEventListeners() {
   const skillsFolderInput = document.getElementById('skills-folder-input');
   const skillsFolderNameInput = document.getElementById('skills-folder-name-input');
   const dsoulProviderInput = document.getElementById('dsoul-provider-input');
+  const rpcBaseInput = document.getElementById('rpc-base-input');
   const toggleActiveBtn = document.getElementById('toggle-active');
 
   const ipfsGatewaysList = document.getElementById('ipfs-gateways-list');
@@ -377,6 +378,7 @@ function setupEventListeners() {
     skillsFolderInput.value = currentSettings?.skillsFolder || '';
     skillsFolderNameInput.value = currentSettings?.skillsFolderName ?? 'skills';
     dsoulProviderInput.value = currentSettings?.dsoulProviderUrl || '';
+    rpcBaseInput.value = currentSettings?.rpcBase ?? '';
     renderIpfsGateways(currentSettings?.ipfsGateways);
     optionsModal.classList.remove('hidden');
   });
@@ -399,6 +401,7 @@ function setupEventListeners() {
       skillsFolder: skillsFolderInput.value,
       skillsFolderName: folderName || 'skills',
       dsoulProviderUrl: (dsoulProviderInput.value || '').trim(),
+      rpcBase: (rpcBaseInput.value || '').trim(),
       ipfsGateways
     };
     const result = await window.electronAPI.saveSettings(settings);
