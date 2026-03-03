@@ -33,3 +33,13 @@ execSync('node scripts/bundle-packages.js', { stdio: 'inherit', cwd: root });
 const cmd = `pkg bin/dsoul.js --targets ${config.target} --output ${config.out}`;
 console.log(`Building ${platform} v${version} → ${config.out}`);
 execSync(cmd, { stdio: 'inherit', cwd: root });
+
+if (platform === 'linux') {
+  console.log('Creating AppImage...');
+  const appimagScript = `bash scripts/make-appimage.sh ${version}`;
+  if (process.platform === 'win32') {
+    execSync(`wsl ${appimagScript}`, { stdio: 'inherit', cwd: root });
+  } else {
+    execSync(appimagScript, { stdio: 'inherit', cwd: root });
+  }
+}

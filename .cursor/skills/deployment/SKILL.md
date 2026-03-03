@@ -22,14 +22,24 @@ Release flow for this repo: tag from `package.json` version first, then build on
 
 ## Build commands
 
-| Command | Platform | Where to run |
-|--------|----------|--------------|
-| `npm run dist:win` | Windows (NSIS + portable) | Windows |
-| `npm run dist:linux` | Linux (AppImage) | Linux or WSL |
-| `npm run dist:linux:wsl` | Linux (AppImage) | Windows (invokes WSL) |
-| `npm run dist:mac` | macOS (DMG + zip) | Mac |
+| Command | Platform | Where to run | Output |
+|--------|----------|--------------|--------|
+| `npm run dist:win` | Windows (NSIS + portable) | Windows | `dist/dsoul-{version}.exe` |
+| `npm run dist:linux` | Linux (binary + AppImage) | Linux or WSL | `dist/dsoul-{version}-linux`, `dist/dsoul-{version}-linux.AppImage` |
+| `npm run dist:linux:wsl` | Linux (binary + AppImage) | Windows (invokes WSL) | same as above |
+| `npm run dist:mac` | macOS (DMG + zip) | Mac | `dist/dsoul-{version}-mac` |
 
 Output goes to `dist/`. After builds, `cleanup:dist` runs automatically.
+
+## Linux / AppImage build details
+
+`dist:linux:wsl` (and `dist:linux`) both:
+1. Cross-compile the linux binary with `pkg` (`dist/dsoul-{version}-linux`).
+2. Call `scripts/make-appimage.sh` (via `wsl` on Windows, directly on Linux) which:
+   - Creates a minimal AppDir with the binary, an AppRun launcher, and the app icon.
+   - Downloads `appimagetool-x86_64.AppImage` into `.appimage-tools/` on first run (cached).
+   - Runs `appimagetool` with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE required – works in WSL).
+   - Outputs `dist/dsoul-{version}-linux.AppImage`.
 
 ## Checklist
 
@@ -45,3 +55,4 @@ Output goes to `dist/`. After builds, `cleanup:dist` runs automatically.
 - **prepdeploy** (`scripts/prepdeploy.js`): ensures the version bump is committed (so the tag matches the built version), pushes the current branch, then creates and pushes tag `v{version}`. Fails if the bump is uncommitted or if version was not updated since the latest tag.
 - Single-platform build: `npm run dist` builds for the current OS only.
 - Pack without installers: `npm run pack` (output in `dist/`).
+- `.appimage-tools/` is gitignored; `appimagetool` is downloaded automatically on the first linux build.

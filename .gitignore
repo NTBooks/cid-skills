@@ -60,5 +60,8 @@ temp/
 *.tmp
 .cache/
 
+# AppImage build tools (downloaded on demand)
+.appimage-tools/
+
 working/
 temp_delete/
