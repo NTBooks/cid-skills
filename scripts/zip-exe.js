@@ -28,15 +28,13 @@ const readme = `Diamond Soul Downloader v${version} — Windows
 
 QUICK START
 -----------
-1. Extract dsoul-${version}.exe to a folder of your choice, e.g.:
+1. Extract dsoul.exe to a folder of your choice, e.g.:
      C:\\Program Files\\dsoul\\dsoul.exe
 
    Or somewhere simpler, like:
      C:\\Users\\YourName\\bin\\dsoul.exe
 
-2. Rename it to dsoul.exe if you want to drop the version number.
-
-3. Add that folder to your PATH so you can run "dsoul" from any terminal.
+2. Add that folder to your PATH so you can run "dsoul" from any terminal.
 
 
 ADDING TO PATH (Windows 11 / 10)
@@ -83,6 +81,6 @@ archive.on('error', (err) => {
 });
 
 archive.pipe(output);
-archive.file(exePath, { name: exeName });
+archive.file(exePath, { name: 'dsoul.exe' });
 archive.append(readme, { name: 'README.txt' });
 archive.finalize();
