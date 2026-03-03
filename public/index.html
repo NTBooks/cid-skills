@@ -38,7 +38,21 @@
       <!-- Sidebar with File Tree -->
       <div class="sidebar">
         <div class="sidebar-header">
-          <h2>Files</h2>
+          <h2>Skills</h2>
+          <div class="sidebar-stats">
+            <div class="stat-item">
+              <span class="stat-val" id="stat-total">—</span>
+              <span class="stat-lbl">installed</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-val stat-val-active" id="stat-active">—</span>
+              <span class="stat-lbl">active</span>
+            </div>
+            <div class="stat-item" id="stat-updates-item">
+              <span class="stat-val stat-val-updates" id="stat-updates">—</span>
+              <span class="stat-lbl">updates</span>
+            </div>
+          </div>
           <button id="scan-updates-btn" class="scan-updates-btn" title="Check each skill for a newer version">Scan for updates</button>
         </div>
         <div id="file-tree" class="file-tree"></div>
@@ -88,7 +102,17 @@
         </div>
 
         <div id="empty-state" class="empty-state">
-          <p>Enter an IPFS CID above to load a file, or select a file from the sidebar.</p>
+          <div class="empty-state-inner">
+            <div class="empty-state-icon">◆</div>
+            <h3 class="empty-state-title">Diamond Soul</h3>
+            <p class="empty-state-subtitle">Decentralized skill sharing via IPFS</p>
+            <div class="empty-state-commands">
+              <div class="empty-cmd"><code>install &lt;cid&gt;</code><span>install a skill</span></div>
+              <div class="empty-cmd"><code>freeze &lt;file&gt;</code><span>publish to IPFS</span></div>
+              <div class="empty-cmd"><code>update</code><span>check for updates</span></div>
+            </div>
+            <p class="empty-state-hint">Select a skill from the sidebar or paste a CID above</p>
+          </div>
         </div>
       </div>
     </div>

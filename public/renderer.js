@@ -1389,6 +1389,22 @@ async function loadAndVerifyFile(cid) {
   }
 }
 
+function updateSidebarStats(files) {
+  const total = files.length;
+  const active = files.filter(f => f.active).length;
+  const updates = nextCidsByCid.size;
+
+  const elTotal = document.getElementById('stat-total');
+  const elActive = document.getElementById('stat-active');
+  const elUpdates = document.getElementById('stat-updates');
+  const elUpdatesItem = document.getElementById('stat-updates-item');
+
+  if (elTotal) elTotal.textContent = total;
+  if (elActive) elActive.textContent = active;
+  if (elUpdates) elUpdates.textContent = updates;
+  if (elUpdatesItem) elUpdatesItem.classList.toggle('has-updates', updates > 0);
+}
+
 async function loadFileTree() {
   if (!currentSettings) await loadSettings();
   const files = await window.electronAPI.getFiles();
@@ -1540,8 +1556,10 @@ async function loadFileTree() {
   }
 
   if (files.length === 0) {
-    fileTree.innerHTML = '<div style="padding: 16px; color: #858585; text-align: center;">No files loaded yet</div>';
+    fileTree.innerHTML = '<div style="padding: 16px; color: #3a5a78; font-size: 12px; text-align: center;">No skills installed yet</div>';
   }
+
+  updateSidebarStats(files);
 }
 
 function createFileItem(file) {
