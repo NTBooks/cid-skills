@@ -46,6 +46,7 @@ async function runCliFreeze(opts, ui) {
 
     if (opts.shortname) ui.detail('shortname', opts.shortname);
     if (opts.tags) ui.detail('tags', opts.tags);
+    if (opts.supercede) ui.detail('supercede', opts.supercede);
     ui.detail('version', version);
 
     let res;
@@ -59,6 +60,7 @@ async function runCliFreeze(opts, ui) {
       if (opts.tags) form.append('tags', opts.tags);
       if (opts.shortname) form.append('shortname', opts.shortname.trim());
       if (opts.license_url) form.append('license_url', opts.license_url.trim());
+      if (opts.supercede) form.append('supercede', opts.supercede.trim());
       const formHeaders = form.getHeaders();
       const bodyBuffer = await new Promise((resolve, reject) => {
         const chunks = [];
@@ -83,6 +85,7 @@ async function runCliFreeze(opts, ui) {
       if (opts.tags) params.append('tags', opts.tags);
       if (opts.shortname) params.append('shortname', opts.shortname.trim());
       if (opts.license_url) params.append('license_url', opts.license_url.trim());
+      if (opts.supercede) params.append('supercede', opts.supercede.trim());
       res = await fetch(freezeUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: authHeader },

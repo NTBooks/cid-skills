@@ -99,6 +99,7 @@ function getCliArgs() {
       else if (a.startsWith('--tags=')) opts.tags = a.slice(7).trim();
       else if (a.startsWith('--version=')) opts.version = a.slice(10).trim();
       else if (a.startsWith('--license_url=')) opts.license_url = a.slice(14).trim();
+      else if (a.startsWith('--supercede=')) opts.supercede = a.slice(12).trim();
     });
     return { command: 'freeze', ...opts };
   }
