@@ -1035,6 +1035,35 @@ body {
   margin-bottom: 8px;
 }
 
+.skills-folder-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.skills-folder-presets .presets-label {
+  font-size: 12px;
+  color: #5a8aaa;
+  margin-right: 4px;
+}
+
+.skills-folder-presets .preset-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  background-color: #162438;
+  border: 1px solid #1d3a5a;
+  border-radius: 4px;
+  color: #c8dff0;
+  cursor: pointer;
+}
+
+.skills-folder-presets .preset-btn:hover {
+  background-color: #1e3350;
+  border-color: #2a5580;
+}
+
 .ipfs-gateways-list {
   margin-bottom: 8px;
 }

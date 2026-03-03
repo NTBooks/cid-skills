@@ -196,6 +196,12 @@
         <div class="folder-input-group">
           <input type="text" id="skills-folder-input" placeholder="Enter skills folder path (e.g. /home/user/skills)" />
         </div>
+        <div class="skills-folder-presets">
+          <span class="presets-label">Set to:</span>
+          <button type="button" id="skills-folder-cursor-btn" class="preset-btn" title="Cursor global skills folder (~/.cursor/skills)">Cursor</button>
+          <button type="button" id="skills-folder-claude-btn" class="preset-btn" title="Claude global skills folder (~/.claude/skills)">Claude</button>
+          <button type="button" id="skills-folder-vscode-btn" class="preset-btn" title="VS Code / GitHub Copilot personal skills folder (~/.copilot/skills)">VS Code</button>
+        </div>
         <p class="options-help">Files activated from the file tree will be copied to this folder as {CID}.MD. Enter the full path.</p>
       </div>
       <div class="options-section">

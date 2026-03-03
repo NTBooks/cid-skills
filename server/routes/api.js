@@ -274,6 +274,16 @@ router.post('/validate-zip-bundle', async (req, res) => {
   }
 });
 
+// GET /api/default-skills-folders — platform-specific default paths for Cursor, Claude, VS Code (Copilot)
+// Cursor: https://cursor.com/docs/context/skills | Claude: ~/.claude/skills | VS Code: https://code.visualstudio.com/docs/copilot/customization/agent-skills
+router.get('/default-skills-folders', (_req, res) => {
+  const home = os.homedir();
+  const cursor = path.join(home, '.cursor', 'skills');
+  const claude = path.join(home, '.claude', 'skills');
+  const vscode = path.join(home, '.copilot', 'skills');
+  res.json({ cursor, claude, vscode });
+});
+
 // POST /api/open-skills-folder
 router.post('/open-skills-folder', async (_req, res) => {
   const settings = await loadSettings();

@@ -37,6 +37,7 @@ window.electronAPI = {
   activateFile: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/activate`, { method: 'POST' }).then(r => r.json()),
   deactivateFile: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/deactivate`, { method: 'POST' }).then(r => r.json()),
   openSkillsFolder: () => fetch('/api/open-skills-folder', { method: 'POST' }).then(r => r.json()),
+  getDefaultSkillsFolders: () => fetch('/api/default-skills-folders').then(r => r.json()),
   hashFileFromPath: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/hash-from-path`).then(r => r.json()),
   verifyBundleIntegrity: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/verify-integrity`).then(r => r.json()),
   getBundleSkillContent: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/bundle/skill`).then(r => r.json()),
@@ -523,6 +524,37 @@ function setupEventListeners() {
       showAlertModal(result.error || 'Could not open skills folder.');
     }
   });
+
+  const defaultFolders = { cursor: '', claude: '', vscode: '' };
+  const cursorPresetBtn = document.getElementById('skills-folder-cursor-btn');
+  const claudePresetBtn = document.getElementById('skills-folder-claude-btn');
+  const vscodePresetBtn = document.getElementById('skills-folder-vscode-btn');
+  async function ensureDefaultFolders() {
+    if (defaultFolders.cursor) return defaultFolders;
+    const folders = await window.electronAPI.getDefaultSkillsFolders();
+    defaultFolders.cursor = folders.cursor || '';
+    defaultFolders.claude = folders.claude || '';
+    defaultFolders.vscode = folders.vscode || '';
+    return defaultFolders;
+  }
+  if (cursorPresetBtn) {
+    cursorPresetBtn.addEventListener('click', async () => {
+      const folders = await ensureDefaultFolders();
+      if (folders.cursor) skillsFolderInput.value = folders.cursor;
+    });
+  }
+  if (claudePresetBtn) {
+    claudePresetBtn.addEventListener('click', async () => {
+      const folders = await ensureDefaultFolders();
+      if (folders.claude) skillsFolderInput.value = folders.claude;
+    });
+  }
+  if (vscodePresetBtn) {
+    vscodePresetBtn.addEventListener('click', async () => {
+      const folders = await ensureDefaultFolders();
+      if (folders.vscode) skillsFolderInput.value = folders.vscode;
+    });
+  }
 
   toggleActiveBtn.addEventListener('click', handleToggleActive);
 
