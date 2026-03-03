@@ -105,6 +105,15 @@ function getCliArgs() {
     if (!directory) return null;
     return { command: 'init', directory };
   }
+  if (cmd === 'rehydrate') {
+    const rest = argv.slice(argIndex);
+    const nonFlags = rest.filter((a) => !a.startsWith('--'));
+    const contractAddress = (nonFlags[0] || '').trim();
+    const folder = (nonFlags[1] || 'data').trim();
+    const full = rest.includes('--full');
+    if (!contractAddress) return null;
+    return { command: 'rehydrate', contractAddress, folder, full };
+  }
   return null;
 }
 
@@ -266,6 +275,12 @@ async function main() {
   if (cliArgs.command === 'hash' && cliArgs.subcommand === 'cidv0') {
     const { runCliHashCidv0 } = require('../cli/commands/hash');
     const ok = await runCliHashCidv0(cliArgs.file);
+    process.exit(ok ? 0 : 1);
+    return;
+  }
+  if (cliArgs.command === 'rehydrate') {
+    const { runCliRehydrate } = require('../cli/commands/rehydrate');
+    const ok = await runCliRehydrate(cliArgs);
     process.exit(ok ? 0 : 1);
     return;
   }
