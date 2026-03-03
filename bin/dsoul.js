@@ -205,7 +205,7 @@ async function main() {
     await ensureDataDir();
     if (cliArgs.fromList) {
       if (cliArgs.global) { log.fail('Global list installs are not available.'); process.exit(1); return; }
-      const installBase = (await loadSettings()).skillsFolderName || 'Skills';
+      const installBase = (await loadSettings()).skillsFolderName || 'skills';
       const skillsFolder = path.join(process.cwd(), installBase);
       const ok = await runCliInstallFromList(skillsFolder, { autoPickOldest: cliArgs.yes, blocklist });
       process.exit(ok ? 0 : 1);
@@ -226,7 +226,7 @@ async function main() {
       console.log(JSON.stringify(shortnameData, null, 2));
     }
     if (blocklist && blocklist.has(cid)) { log.fail(`Cannot install: CID ${log.cid(cid)} is on the blocklist.`); process.exit(1); return; }
-    const installBase = cliArgs.global ? null : (await loadSettings()).skillsFolderName || 'Skills';
+    const installBase = cliArgs.global ? null : (await loadSettings()).skillsFolderName || 'skills';
     const installOptions = cliArgs.global ? {} : { skillsFolder: path.join(process.cwd(), installBase) };
     if (cliArgs.yes) installOptions.autoPickOldest = true;
     const ok = await runCliInstall(cid, installOptions, cliArgs.target);

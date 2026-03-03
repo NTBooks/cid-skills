@@ -18,7 +18,7 @@ async function runCliUpdate(cliArgs, blocklist) {
   log.header('Checking for updates');
   const settings = await loadSettings();
   const globalFolder = (settings.skillsFolder || process.env.DSOUL_SKILLS_FOLDER || '').trim();
-  const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'Skills';
+  const folderName = (settings.skillsFolderName != null && String(settings.skillsFolderName).trim() !== '') ? String(settings.skillsFolderName).trim() : 'skills';
   const localFolder = path.join(process.cwd(), folderName);
   const folders = [];
   if (cliArgs.globalOnly && globalFolder) folders.push({ dir: globalFolder, label: 'global' });

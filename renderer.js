@@ -375,7 +375,7 @@ function setupEventListeners() {
   optionsBtn.addEventListener('click', async () => {
     await loadSettings();
     skillsFolderInput.value = currentSettings?.skillsFolder || '';
-    skillsFolderNameInput.value = currentSettings?.skillsFolderName ?? 'Skills';
+    skillsFolderNameInput.value = currentSettings?.skillsFolderName ?? 'skills';
     dsoulProviderInput.value = currentSettings?.dsoulProviderUrl || '';
     renderIpfsGateways(currentSettings?.ipfsGateways);
     optionsModal.classList.remove('hidden');
@@ -397,7 +397,7 @@ function setupEventListeners() {
     const folderName = (skillsFolderNameInput.value || '').trim();
     const settings = {
       skillsFolder: skillsFolderInput.value,
-      skillsFolderName: folderName || 'Skills',
+      skillsFolderName: folderName || 'skills',
       dsoulProviderUrl: (dsoulProviderInput.value || '').trim(),
       ipfsGateways
     };
