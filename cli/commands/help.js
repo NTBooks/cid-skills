@@ -20,6 +20,7 @@ function getCliHelpText(pluginHelps = []) {
     `  ${c.cyan}search${c.reset} ${c.gray}[query] [-n N] [--page=N]${c.reset}  Search the registry (no query: browse homepage)`,
     `  ${c.cyan}hash cidv0${c.reset} ${c.gray}<file>${c.reset}          Print CIDv0 (IPFS) hash of a file`,
     `  ${c.cyan}freeze${c.reset} ${c.gray}<file> [opts]${c.reset}       Stamp a file via DSOUL freeze API`,
+    `  ${c.cyan}supercede${c.reset} ${c.gray}<post-id> <cid>${c.reset}  Mark a frozen file as superseded by a CID`,
     `  ${c.cyan}status${c.reset}                     Show current config and credential status`,
     `  ${c.cyan}balance${c.reset}                    Check stamp/credit balance`,
     `  ${c.cyan}files${c.reset} ${c.gray}[opts]${c.reset}               List your frozen files`,

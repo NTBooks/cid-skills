@@ -103,6 +103,12 @@ function getCliArgs() {
     });
     return { command: 'freeze', ...opts };
   }
+  if (cmd === 'supercede') {
+    const postId = (argv[argIndex] || '').trim();
+    const supercedeCid = (argv[argIndex + 1] || '').trim();
+    if (!postId || !supercedeCid) return null;
+    return { command: 'supercede', postId, supercedeCid };
+  }
   if (cmd === 'hash') {
     const sub = argv[argIndex];
     const file = (argv[argIndex + 1] || '').trim();
@@ -323,6 +329,11 @@ async function main(ui, cliArgs) {
   if (cliArgs.command === 'freeze') {
     const { runCliFreeze } = require('../cli/commands/freeze');
     const ok = await runCliFreeze(cliArgs, ui);
+    return ok;
+  }
+  if (cliArgs.command === 'supercede') {
+    const { runCliSupercede } = require('../cli/commands/supercede');
+    const ok = await runCliSupercede(cliArgs, ui);
     return ok;
   }
   if (cliArgs.command === 'hash' && cliArgs.subcommand === 'cidv0') {
