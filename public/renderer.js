@@ -33,6 +33,10 @@ window.electronAPI = {
   saveSettings: (settings) => fetch('/api/settings', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
   }).then(r => r.json()),
+  getNetworkSettings: () => fetch('/api/network-settings').then(r => r.json()),
+  saveNetworkSettings: (settings) => fetch('/api/network-settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
+  }).then(r => r.json()),
   selectFolder: () => Promise.resolve({ success: false, error: 'Use the text input to enter a folder path' }),
   activateFile: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/activate`, { method: 'POST' }).then(r => r.json()),
   deactivateFile: (cid) => fetch(`/api/files/${encodeURIComponent(cid)}/deactivate`, { method: 'POST' }).then(r => r.json()),
@@ -471,6 +475,16 @@ function setupEventListeners() {
 
   const ipfsGatewaysList = document.getElementById('ipfs-gateways-list');
   const addIpfsGatewayBtn = document.getElementById('add-ipfs-gateway-btn');
+  const allowNonLocalCheckbox = document.getElementById('allow-nonlocal-checkbox');
+  const networkAuthFields = document.getElementById('network-auth-fields');
+  const adminUsernameInput = document.getElementById('admin-username-input');
+  const adminPasswordInput = document.getElementById('admin-password-input');
+
+  if (allowNonLocalCheckbox) {
+    allowNonLocalCheckbox.addEventListener('change', () => {
+      if (networkAuthFields) networkAuthFields.classList.toggle('hidden', !allowNonLocalCheckbox.checked);
+    });
+  }
 
   function renderIpfsGateways(urls) {
     if (!ipfsGatewaysList) return;
@@ -521,6 +535,13 @@ function setupEventListeners() {
     dsoulProviderInput.value = currentSettings?.dsoulProviderUrl || '';
     rpcBaseInput.value = currentSettings?.rpcBase ?? '';
     renderIpfsGateways(currentSettings?.ipfsGateways);
+    const netSettings = await window.electronAPI.getNetworkSettings().catch(() => ({}));
+    if (allowNonLocalCheckbox) {
+      allowNonLocalCheckbox.checked = !!netSettings.allowNonLocalhost;
+      if (networkAuthFields) networkAuthFields.classList.toggle('hidden', !netSettings.allowNonLocalhost);
+    }
+    if (adminUsernameInput) adminUsernameInput.value = netSettings.adminUsername || '';
+    if (adminPasswordInput) adminPasswordInput.value = '';
     optionsModal.classList.remove('hidden');
   });
 
@@ -528,6 +549,17 @@ function setupEventListeners() {
     optionsModal.classList.add('hidden');
     const banner = document.getElementById('first-run-banner');
     if (banner) banner.classList.add('hidden');
+  });
+
+  // Settings panel tab navigation
+  document.querySelectorAll('.settings-nav-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
+      btn.classList.add('active');
+      const section = document.getElementById(btn.dataset.target);
+      if (section) section.classList.add('active');
+    });
   });
 
   optionsSave.addEventListener('click', async () => {
@@ -539,6 +571,13 @@ function setupEventListeners() {
       showAlertModal('At least one IPFS gateway is required.');
       return;
     }
+    const allowNonLocalhost = allowNonLocalCheckbox ? allowNonLocalCheckbox.checked : false;
+    if (allowNonLocalhost) {
+      if (!adminUsernameInput || !(adminUsernameInput.value || '').trim()) {
+        showAlertModal('Admin username is required when enabling remote access.');
+        return;
+      }
+    }
     const folderName = (skillsFolderNameInput.value || '').trim();
     const settings = {
       skillsFolder: skillsFolderInput.value,
@@ -548,14 +587,23 @@ function setupEventListeners() {
       ipfsGateways
     };
     const result = await window.electronAPI.saveSettings(settings);
-    if (result.success) {
-      currentSettings = settings;
-      optionsModal.classList.add('hidden');
-      const banner = document.getElementById('first-run-banner');
-      if (banner) banner.classList.add('hidden');
-    } else {
+    if (!result.success) {
       showAlertModal('Error saving settings: ' + result.error);
+      return;
     }
+    const netResult = await window.electronAPI.saveNetworkSettings({
+      allowNonLocalhost,
+      adminUsername: adminUsernameInput ? (adminUsernameInput.value || '').trim() : '',
+      adminPassword: adminPasswordInput ? (adminPasswordInput.value || '') : '',
+    });
+    if (!netResult.success) {
+      showAlertModal('Error saving network settings: ' + netResult.error);
+      return;
+    }
+    currentSettings = settings;
+    optionsModal.classList.add('hidden');
+    const banner = document.getElementById('first-run-banner');
+    if (banner) banner.classList.add('hidden');
   });
 
   const openSkillsFolderBtn = document.getElementById('open-skills-folder-btn');

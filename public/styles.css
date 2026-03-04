@@ -1027,36 +1027,206 @@ body {
 .first-run-banner {
   background: #1a3a2a;
   border: 1px solid #2a6a4a;
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
+  border-radius: 0;
+  padding: 12px 40px;
   color: #7fffd4;
   font-size: 14px;
+  flex-shrink: 0;
 }
 
-.options-section {
-  margin-bottom: 20px;
+/* ── Settings Panel (Discord-like) ─────────────────────── */
+.settings-panel {
+  display: flex;
+  width: 88vw;
+  max-width: 860px;
+  height: 82vh;
+  max-height: 680px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(91, 200, 224, 0.06);
 }
 
-.options-section label {
+/* Sidebar */
+.settings-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background-color: #0d1b2a;
+  padding: 20px 8px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-sidebar-heading {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #3a5a78;
+  padding: 0 10px 12px;
+}
+
+.settings-nav-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3a5a78;
+  padding: 16px 10px 4px;
+}
+
+.settings-nav-item {
   display: block;
-  margin-bottom: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: none;
+  background: none;
+  color: #8aadcc;
   font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s;
+  margin-bottom: 1px;
+}
+
+.settings-nav-item:hover {
+  background-color: #142236;
+  color: #c8dff0;
+}
+
+.settings-nav-item.active {
+  background-color: #1a3a5a;
+  color: #5bc8e0;
   font-weight: 500;
 }
 
-.folder-input-group {
+/* Content area */
+.settings-content {
+  flex: 1;
+  background: linear-gradient(160deg, #0e2038 0%, #111e30 100%);
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  border-left: 1px solid #1d3a5a;
 }
 
+.settings-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: #5a8aaa;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s, color 0.15s;
+  z-index: 10;
+}
+
+.settings-close-btn:hover {
+  background-color: #1e3350;
+  color: #c8dff0;
+}
+
+.settings-content-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 40px 24px;
+}
+
+/* Sections */
+.settings-section {
+  display: none;
+}
+
+.settings-section.active {
+  display: block;
+}
+
+.settings-section-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #c8dff0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #1d3a5a;
+  margin-bottom: 28px;
+}
+
+.settings-group {
+  margin-bottom: 24px;
+}
+
+.settings-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c8dff0;
+  margin-bottom: 6px;
+}
+
+.settings-desc {
+  font-size: 13px;
+  color: #5a8aaa;
+  margin-bottom: 10px;
+  line-height: 1.55;
+}
+
+.settings-desc code {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: #5bc8e0;
+  background: rgba(91, 200, 224, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.settings-input {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: #0d1e30;
+  border: 1px solid #1d3a5a;
+  border-radius: 4px;
+  color: #c8dff0;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: #5bc8e0;
+  box-shadow: 0 0 0 2px rgba(91, 200, 224, 0.12);
+}
+
+.settings-input::placeholder {
+  color: #3a5a78;
+}
+
+.settings-divider {
+  height: 1px;
+  background: #1d3a5a;
+  margin: 28px 0;
+}
+
+/* Preset buttons */
 .skills-folder-presets {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-top: 10px;
 }
 
 .skills-folder-presets .presets-label {
@@ -1066,18 +1236,150 @@ body {
 }
 
 .skills-folder-presets .preset-btn {
-  padding: 4px 10px;
+  padding: 4px 12px;
   font-size: 12px;
   background-color: #162438;
   border: 1px solid #1d3a5a;
   border-radius: 4px;
   color: #c8dff0;
   cursor: pointer;
+  transition: background-color 0.1s, border-color 0.1s;
 }
 
 .skills-folder-presets .preset-btn:hover {
   background-color: #1e3350;
   border-color: #2a5580;
+}
+
+/* Add gateway button */
+.settings-add-btn {
+  margin-top: 8px;
+  padding: 6px 14px;
+  background-color: #0f5a8a;
+  border: 1px solid #1472aa;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color 0.1s;
+}
+
+.settings-add-btn:hover {
+  background-color: #1472aa;
+}
+
+/* Toggle group (for checkbox settings) */
+.settings-group-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.settings-group-toggle-text {
+  flex: 1;
+}
+
+/* Toggle switch */
+.settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.settings-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.settings-toggle-track {
+  position: absolute;
+  inset: 0;
+  background-color: #1d3a5a;
+  border-radius: 12px;
+  transition: background-color 0.2s;
+}
+
+.settings-toggle input:checked + .settings-toggle-track {
+  background-color: #1a7aba;
+}
+
+.settings-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: #8aadcc;
+  border-radius: 50%;
+  transition: transform 0.2s, background-color 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.settings-toggle input:checked + .settings-toggle-track .settings-toggle-thumb {
+  transform: translateX(20px);
+  background: #fff;
+}
+
+/* Network auth sub-fields */
+.network-auth-fields {
+  margin-top: 16px;
+  padding: 20px;
+  background: #0d1e30;
+  border: 1px solid #1d3a5a;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Footer */
+.settings-footer {
+  padding: 14px 40px;
+  border-top: 1px solid #1d3a5a;
+  background-color: #0d1b2a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.settings-save-btn {
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #1a7aba 0%, #1d8fd4 100%);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.settings-save-btn:hover {
+  background: linear-gradient(135deg, #1d8fd4 0%, #22a0e8 100%);
+  box-shadow: 0 0 10px rgba(91, 200, 224, 0.2);
+}
+
+.settings-cancel-btn {
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: #5a8aaa;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.1s;
+}
+
+.settings-cancel-btn:hover {
+  color: #c8dff0;
 }
 
 .ipfs-gateways-list {
@@ -1135,96 +1437,6 @@ body {
   background-color: #1472aa;
 }
 
-/* DSOUL provider: editable dark-mode text box */
-.dsoul-provider-input,
-#dsoul-provider-input {
-  width: 100%;
-  padding: 10px 14px;
-  margin-bottom: 4px;
-  background-color: #111e30;
-  border: 1px solid #1d3a5a;
-  border-radius: 6px;
-  color: #c8dff0;
-  font-size: 14px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.dsoul-provider-input::placeholder,
-#dsoul-provider-input::placeholder {
-  color: #6e6e6e;
-}
-
-.dsoul-provider-input:hover,
-#dsoul-provider-input:hover {
-  border-color: #505050;
-}
-
-.dsoul-provider-input:focus,
-#dsoul-provider-input:focus {
-  outline: none;
-  border-color: #1a7aba;
-  box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.25);
-}
-
-.dsoul-provider-input:disabled,
-#dsoul-provider-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-#skills-folder-input {
-  flex: 1;
-  padding: 8px 12px;
-  background-color: #162438;
-  border: 1px solid #1d3a5a;
-  border-radius: 4px;
-  color: #c8dff0;
-  font-size: 14px;
-}
-
-#skills-folder-input:focus {
-  outline: none;
-  border-color: #1a7aba;
-}
-
-#browse-folder-btn {
-  padding: 8px 16px;
-  background-color: #1a7aba;
-  border: none;
-  border-radius: 4px;
-  color: white;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-#browse-folder-btn:hover {
-  background-color: #0f5c96;
-}
-
-.options-help {
-  font-size: 12px;
-  color: #5a8aaa;
-  margin-top: 4px;
-}
-
-#options-save {
-  background-color: #1a7aba;
-  color: white;
-}
-
-#options-save:hover {
-  background-color: #0f5c96;
-}
-
-#options-cancel {
-  background-color: #162438;
-  color: #c8dff0;
-}
-
-#options-cancel:hover {
-  background-color: #1e3350;
-}
 
 .file-item-install-badge {
   flex-shrink: 0;

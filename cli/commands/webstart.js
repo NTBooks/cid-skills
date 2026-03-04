@@ -1,12 +1,12 @@
 const { createServer } = require('../../server');
 const { loadDotEnv } = require('../../lib/config');
-const { ensureDataDir } = require('../../lib/storage');
+const { ensureDataDir, loadNetworkSettings } = require('../../lib/storage');
 
-async function tryListen(app, startPort, maxTries) {
+async function tryListen(app, startPort, maxTries, host) {
   for (let i = 0; i < maxTries; i++) {
     const port = startPort + i;
     const result = await new Promise((resolve) => {
-      const server = app.listen(port, () => resolve({ ok: true, server, port }));
+      const server = app.listen(port, host, () => resolve({ ok: true, server, port }));
       server.once('error', (err) =>
         err.code === 'EADDRINUSE' ? resolve({ ok: false }) : resolve({ ok: false, err })
       );
@@ -21,10 +21,12 @@ async function runWebstart(portArg, ui) {
   await ensureDataDir();
 
   const env = await loadDotEnv();
+  const netSettings = await loadNetworkSettings();
+  const host = netSettings.allowNonLocalhost ? '0.0.0.0' : '127.0.0.1';
   const startPort = portArg || parseInt(process.env.PORT, 10) || parseInt(env.PORT, 10) || 8148;
   const app = createServer();
 
-  const result = await tryListen(app, startPort, portArg ? 1 : 10);
+  const result = await tryListen(app, startPort, portArg ? 1 : 10, host);
 
   if (!result.ok) {
     const log = ui || require('../log');

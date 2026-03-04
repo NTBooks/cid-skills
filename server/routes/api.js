@@ -5,7 +5,7 @@ const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 const diff = require('diff');
 const { getFilesDir } = require('../../lib/config');
-const { ensureDataDir, loadSettings, saveSettings, readFileData, saveFileData, doDeleteFile, getAllFiles, updateFileTags } = require('../../lib/storage');
+const { ensureDataDir, loadSettings, saveSettings, loadNetworkSettings, saveNetworkSettings, hashPassword, verifyPassword, readFileData, saveFileData, doDeleteFile, getAllFiles, updateFileTags } = require('../../lib/storage');
 const { calculateCid } = require('../../lib/hash');
 const { fetchDsoulByCid } = require('../../lib/dsoul-api');
 const { doActivateFile, doDeactivateFile } = require('../../lib/skills');
@@ -16,6 +16,32 @@ const router = express.Router();
 
 router.use(async (_req, _res, next) => {
   await ensureDataDir();
+  next();
+});
+
+function isLocalhost(req) {
+  const ip = req.ip || (req.connection && req.connection.remoteAddress) || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+router.use(async (req, res, next) => {
+  if (isLocalhost(req)) return next();
+  const net = await loadNetworkSettings();
+  if (!net.allowNonLocalhost) return res.status(403).json({ error: 'Remote connections not allowed' });
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="DSoul"');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+  const colon = decoded.indexOf(':');
+  const username = decoded.slice(0, colon);
+  const password = decoded.slice(colon + 1);
+  if (!net.adminUsername || !net.adminPasswordHash ||
+      username !== net.adminUsername || !verifyPassword(password, net.adminPasswordHash)) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="DSoul"');
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
   next();
 });
 
@@ -100,6 +126,39 @@ router.get('/settings', async (_req, res) => {
 // PUT /api/settings
 router.put('/settings', async (req, res) => {
   const result = await saveSettings(req.body);
+  res.json(result);
+});
+
+// GET /api/network-settings — localhost only, never returns password hash
+router.get('/network-settings', async (req, res) => {
+  if (!isLocalhost(req)) return res.status(403).json({ error: 'Localhost only' });
+  const net = await loadNetworkSettings();
+  res.json({
+    allowNonLocalhost: net.allowNonLocalhost || false,
+    adminUsername: net.adminUsername || '',
+    hasPassword: !!net.adminPasswordHash,
+  });
+});
+
+// PUT /api/network-settings — localhost only
+router.put('/network-settings', async (req, res) => {
+  if (!isLocalhost(req)) return res.status(403).json({ error: 'Localhost only' });
+  const { allowNonLocalhost, adminUsername, adminPassword } = req.body || {};
+  if (allowNonLocalhost && (!adminUsername || !String(adminUsername).trim())) {
+    return res.status(400).json({ error: 'Admin username required when enabling remote access' });
+  }
+  const existing = await loadNetworkSettings();
+  const passwordHash = adminPassword
+    ? hashPassword(String(adminPassword))
+    : (existing.adminPasswordHash || '');
+  if (allowNonLocalhost && !passwordHash) {
+    return res.status(400).json({ error: 'Admin password required when enabling remote access' });
+  }
+  const result = await saveNetworkSettings({
+    allowNonLocalhost: !!allowNonLocalhost,
+    adminUsername: adminUsername ? String(adminUsername).trim() : '',
+    adminPasswordHash: passwordHash,
+  });
   res.json(result);
 });
 
@@ -368,8 +427,14 @@ const EXEC_ALLOWED = new Set([
   'install', 'uninstall', 'update', 'upgrade', 'init',
   'package', 'hash', 'freeze', 'balance', 'files',
   'register', 'unregister', 'config',
-  'rehydrate', 'plugin',
+  'rehydrate',
 ]);
+
+const CWD = process.cwd();
+function isArgSafe(arg) {
+  const resolved = path.resolve(CWD, arg);
+  return resolved === CWD || resolved.startsWith(CWD + path.sep) || resolved.startsWith(CWD + '/');
+}
 
 function stripAnsi(str) {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
@@ -395,6 +460,9 @@ router.post('/exec', (req, res) => {
   }
   if (!Array.isArray(args) || args.some(a => typeof a !== 'string')) {
     return res.status(400).json({ error: 'Invalid args' });
+  }
+  if (args.some(a => !isArgSafe(a))) {
+    return res.status(400).json({ error: 'Invalid args: path traversal not allowed' });
   }
 
   const dsoulBin = path.join(__dirname, '..', '..', 'bin', 'dsoul.js');

@@ -204,50 +204,112 @@
 
   <!-- Options Modal -->
   <div id="options-modal" class="modal hidden">
-    <div class="modal-content">
-      <div id="first-run-banner" class="first-run-banner hidden">
-        <strong>Welcome to Diamond Soul!</strong> Configure your skills folder and provider to get started.
+    <div class="settings-panel">
+      <!-- Sidebar -->
+      <div class="settings-sidebar">
+        <div class="settings-sidebar-heading">Settings</div>
+        <nav class="settings-nav">
+          <div class="settings-nav-label">Connectivity</div>
+          <button class="settings-nav-item active" data-target="settings-api">API &amp; Provider</button>
+          <button class="settings-nav-item" data-target="settings-gateways">IPFS Gateways</button>
+          <div class="settings-nav-label">Skills</div>
+          <button class="settings-nav-item" data-target="settings-skills">Skills Folder</button>
+          <div class="settings-nav-label">Network</div>
+          <button class="settings-nav-item" data-target="settings-network">Remote Access</button>
+        </nav>
       </div>
-      <h3>Options</h3>
-      <div class="options-section">
-        <label for="dsoul-provider-input">DSOUL API host:</label>
-        <input type="text" id="dsoul-provider-input" class="dsoul-provider-input" placeholder="https://dsoul.org" autocomplete="url" />
-        <p class="options-help">Host only (e.g. https://dsoul.org). The path /wp-json/diamond-soul/v1 is added by the app. Leave empty to use .env or default.</p>
-      </div>
-      <div class="options-section">
-        <label for="rpc-base-input">RPC Base (rehydrate):</label>
-        <input type="text" id="rpc-base-input" class="rpc-base-input" placeholder="Comma-separated Base RPC URLs" autocomplete="url" />
-        <p class="options-help">Comma-separated RPC URLs used by the rehydrate command. Highest priority: .env RPC_BASE, then this setting, then app default.</p>
-      </div>
-      <div class="options-section">
-        <label>IPFS gateways:</label>
-        <p class="options-help">URLs used to download content by CID. At least one required. With one gateway, multi-source comparison is skipped.</p>
-        <div id="ipfs-gateways-list" class="ipfs-gateways-list"></div>
-        <button type="button" id="add-ipfs-gateway-btn" class="add-gateway-btn">Add gateway</button>
-      </div>
-      <div class="options-section">
-        <label for="skills-folder-input">Skills Folder:</label>
-        <div class="folder-input-group">
-          <input type="text" id="skills-folder-input" placeholder="Enter skills folder path (e.g. /home/user/skills)" />
+
+      <!-- Content -->
+      <div class="settings-content">
+        <button class="settings-close-btn" onclick="document.getElementById('options-cancel').click()" title="Close">✕</button>
+        <div id="first-run-banner" class="first-run-banner hidden">
+          <strong>Welcome to Diamond Soul!</strong> Configure your skills folder and provider to get started.
         </div>
-        <div class="skills-folder-presets">
-          <span class="presets-label">Set to:</span>
-          <button type="button" id="skills-folder-cursor-btn" class="preset-btn" title="Cursor global skills folder (~/.cursor/skills)">Cursor</button>
-          <button type="button" id="skills-folder-claude-btn" class="preset-btn" title="Claude global skills folder (~/.claude/skills)">Claude</button>
-          <button type="button" id="skills-folder-vscode-btn" class="preset-btn" title="VS Code / GitHub Copilot personal skills folder (~/.copilot/skills)">VS Code</button>
+        <div class="settings-content-scroll">
+
+          <!-- API & Provider -->
+          <div class="settings-section active" id="settings-api">
+            <h2 class="settings-section-title">API &amp; Provider</h2>
+            <div class="settings-group">
+              <label class="settings-label" for="dsoul-provider-input">DSOUL API Host</label>
+              <p class="settings-desc">Host only (e.g. <code>https://dsoul.org</code>). The path <code>/wp-json/diamond-soul/v1</code> is appended automatically. Leave empty to use .env or default.</p>
+              <input type="text" id="dsoul-provider-input" class="settings-input" placeholder="https://dsoul.org" autocomplete="url" />
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-group">
+              <label class="settings-label" for="rpc-base-input">RPC Base (Rehydrate)</label>
+              <p class="settings-desc">Comma-separated RPC URLs for the rehydrate command. Priority: <code>.env RPC_BASE</code> → this setting → app default.</p>
+              <input type="text" id="rpc-base-input" class="settings-input" placeholder="Comma-separated Base RPC URLs" autocomplete="url" />
+            </div>
+          </div>
+
+          <!-- IPFS Gateways -->
+          <div class="settings-section" id="settings-gateways">
+            <h2 class="settings-section-title">IPFS Gateways</h2>
+            <div class="settings-group">
+              <label class="settings-label">Gateways</label>
+              <p class="settings-desc">URLs used to download content by CID. At least one is required. With a single gateway, multi-source comparison is skipped.</p>
+              <div id="ipfs-gateways-list" class="ipfs-gateways-list"></div>
+              <button type="button" id="add-ipfs-gateway-btn" class="settings-add-btn">+ Add gateway</button>
+            </div>
+          </div>
+
+          <!-- Skills Folder -->
+          <div class="settings-section" id="settings-skills">
+            <h2 class="settings-section-title">Skills Folder</h2>
+            <div class="settings-group">
+              <label class="settings-label" for="skills-folder-input">Global Skills Folder</label>
+              <p class="settings-desc">When you activate a skill it is copied here as <code>{CID}.MD</code>. Enter the full path to your AI assistant's skills directory.</p>
+              <input type="text" id="skills-folder-input" class="settings-input" placeholder="Enter skills folder path (e.g. /home/user/skills)" />
+              <div class="skills-folder-presets">
+                <span class="presets-label">Quick set:</span>
+                <button type="button" id="skills-folder-cursor-btn" class="preset-btn" title="Cursor global skills folder (~/.cursor/skills)">Cursor</button>
+                <button type="button" id="skills-folder-claude-btn" class="preset-btn" title="Claude global skills folder (~/.claude/skills)">Claude</button>
+                <button type="button" id="skills-folder-vscode-btn" class="preset-btn" title="VS Code / GitHub Copilot personal skills folder (~/.copilot/skills)">VS Code</button>
+              </div>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-group">
+              <label class="settings-label" for="skills-folder-name-input">Local Folder Name</label>
+              <p class="settings-desc">Folder name used when installing locally (e.g. CLI <code>install</code> without <code>-g</code>). Default: <code>skills</code>.</p>
+              <input type="text" id="skills-folder-name-input" class="settings-input" placeholder="skills" />
+            </div>
+          </div>
+
+          <!-- Network -->
+          <div class="settings-section" id="settings-network">
+            <h2 class="settings-section-title">Remote Access</h2>
+            <div class="settings-group settings-group-toggle">
+              <div class="settings-group-toggle-text">
+                <label class="settings-label" for="allow-nonlocal-checkbox">Allow Connections from Other Devices</label>
+                <p class="settings-desc">When enabled, the web UI accepts connections from other devices on the network. Requires an admin account. A restart is required to take effect.</p>
+              </div>
+              <label class="settings-toggle" title="Toggle remote access">
+                <input type="checkbox" id="allow-nonlocal-checkbox" />
+                <span class="settings-toggle-track"><span class="settings-toggle-thumb"></span></span>
+              </label>
+            </div>
+            <div id="network-auth-fields" class="network-auth-fields hidden">
+              <div class="settings-group">
+                <label class="settings-label" for="admin-username-input">Admin Username</label>
+                <input type="text" id="admin-username-input" class="settings-input" autocomplete="username" />
+              </div>
+              <div class="settings-group">
+                <label class="settings-label" for="admin-password-input">Admin Password</label>
+                <input type="password" id="admin-password-input" class="settings-input" autocomplete="new-password" placeholder="Leave blank to keep existing password" />
+              </div>
+            </div>
+          </div>
+
+        </div><!-- .settings-content-scroll -->
+
+        <!-- Footer -->
+        <div class="settings-footer">
+          <button id="options-save" class="settings-save-btn">Save Changes</button>
+          <button id="options-cancel" class="settings-cancel-btn">Cancel</button>
         </div>
-        <p class="options-help">Files activated from the file tree will be copied to this folder as {CID}.MD. Enter the full path.</p>
-      </div>
-      <div class="options-section">
-        <label for="skills-folder-name-input">Skills folder name (local):</label>
-        <input type="text" id="skills-folder-name-input" placeholder="skills" />
-        <p class="options-help">Folder name used when installing locally (e.g. CLI <code>install</code> without <code>-g</code>). Default: skills.</p>
-      </div>
-      <div class="modal-buttons">
-        <button id="options-save">Save</button>
-        <button id="options-cancel">Cancel</button>
-      </div>
-    </div>
+      </div><!-- .settings-content -->
+    </div><!-- .settings-panel -->
   </div>
 
   <script src="Skills/clverify-2025-02-09-1/clverify/clverify.js"></script>
