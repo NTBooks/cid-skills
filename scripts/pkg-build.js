@@ -30,7 +30,10 @@ execSync('node scripts/bundle-public.js', { stdio: 'inherit', cwd: root });
 console.log('Bundling plugin packages into packages/bundles.js...');
 execSync('node scripts/bundle-packages.js', { stdio: 'inherit', cwd: root });
 
-const cmd = `pkg bin/dsoul.js --targets ${config.target} --output ${config.out}`;
+// Cross-platform builds can't execute the target binary for bytecode generation
+const nativePlatform = { win32: 'win', darwin: 'mac', linux: 'linux' }[process.platform];
+const noBytecode = nativePlatform !== platform ? '--no-bytecode --public' : '';
+const cmd = `pkg bin/dsoul.js --targets ${config.target} ${noBytecode} --output ${config.out}`.trim();
 console.log(`Building ${platform} v${version} → ${config.out}`);
 execSync(cmd, { stdio: 'inherit', cwd: root });
 
