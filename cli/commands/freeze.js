@@ -21,8 +21,9 @@ async function runCliFreeze(opts, ui) {
     const stat = await fs.stat(filePath).catch(() => null);
     if (!stat || !stat.isFile()) { ui.fail('File not found or not a file: ' + filePath); return false; }
 
-    const filename = path.basename(filePath);
-    const ext = path.extname(filename).toLowerCase();
+    const filenameOverride = opts.filename && String(opts.filename).trim();
+    const filename = filenameOverride || path.basename(filePath);
+    const ext = path.extname(path.basename(filePath)).toLowerCase();
 
     if (ext === '.zip') {
       ui.step('Validating zip structure');
@@ -44,6 +45,7 @@ async function runCliFreeze(opts, ui) {
     const version = (opts.version && String(opts.version).trim()) || '1.0.0';
     const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
 
+    if (filenameOverride) ui.detail('filename', filenameOverride);
     if (opts.shortname) ui.detail('shortname', opts.shortname);
     if (opts.tags) ui.detail('tags', opts.tags);
     if (opts.supercede) ui.detail('supercede', opts.supercede);
