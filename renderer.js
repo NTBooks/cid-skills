@@ -476,6 +476,8 @@ let verifiedFileContent = null;
 let verifiedFileIsBundle = false;
 /** When the verified bundle is a zip with a single root folder containing Skill.MD, this is that folder name. */
 let verifiedZipRootFolderName = null;
+/** Parsed skill metadata (name, description, author) from SKILL.md, including from bundles. */
+let verifiedSkillMetadata = null;
 // Chosen DSOUL entry from disambiguation (used when saving file on Load or Reverify)
 let pendingDsoulEntry = null;
 
@@ -495,8 +497,8 @@ async function handleInstall() {
   try {
     const isBundle = verifiedFileIsBundle;
     const contentStr = typeof verifiedFileContent === 'string' ? verifiedFileContent : new TextDecoder().decode(verifiedFileContent);
-    const skillMetadata = isBundle ? null : parseSkillHeader(contentStr);
-    
+    const skillMetadata = verifiedSkillMetadata ?? (isBundle ? null : parseSkillHeader(contentStr));
+
     // Preserve existing file fields (tags, active, dsoulEntry) when updating
     const existing = await window.electronAPI.readFile(cid);
     const fileData = {
@@ -531,6 +533,7 @@ async function handleInstall() {
     verifiedFileContent = null;
     verifiedFileIsBundle = false;
     verifiedZipRootFolderName = null;
+    verifiedSkillMetadata = null;
     pendingDsoulEntry = null;
   } catch (error) {
     alert('Error installing file: ' + error.message);
@@ -695,6 +698,7 @@ async function handleLoad() {
   verifiedFileContent = null;
   verifiedFileIsBundle = false;
   verifiedZipRootFolderName = null;
+  verifiedSkillMetadata = null;
   pendingDsoulEntry = null;
 
   // Hide install section if it was shown
@@ -750,6 +754,7 @@ function handleCancelLoad() {
   verifiedFileContent = null;
   verifiedFileIsBundle = false;
   verifiedZipRootFolderName = null;
+  verifiedSkillMetadata = null;
   const loadBtn = document.getElementById('load-btn');
   loadBtn.disabled = false;
 }
@@ -937,8 +942,7 @@ async function loadAndVerifyFile(cid) {
     // Store verified content for installation
     verifiedFileContent = firstContent;
     verifiedFileIsBundle = isBundle;
-
-    // skillMetadata already set in step 2 (includes bundle Skill.MD when validated from zip)
+    verifiedSkillMetadata = skillMetadata || null;
 
     // Show install section
     const installSection = document.getElementById('install-section');
@@ -1649,6 +1653,7 @@ async function handleReverify() {
   verifiedFileContent = null;
   verifiedFileIsBundle = false;
   verifiedZipRootFolderName = null;
+  verifiedSkillMetadata = null;
 
   // Hide install section if it was shown
   document.getElementById('install-section').classList.add('hidden');

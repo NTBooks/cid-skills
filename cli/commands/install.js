@@ -190,7 +190,15 @@ async function runCliInstall(cid, options = {}, installRef, ui) {
     ui.ok('CID verified');
 
     const contentStr = buf.toString('utf-8');
-    const skillMetadata = isBundle ? null : parseSkillHeaderForCli(contentStr);
+    let skillMetadata = isBundle ? null : parseSkillHeaderForCli(contentStr);
+    if (isBundle && !skillMetadata) {
+      const tmpPath = path.join(os.tmpdir(), `dsoul-meta-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+      try {
+        await fs.writeFile(tmpPath, buf);
+        const info = await getZipBundleInfo(tmpPath);
+        if (info.skillContent) skillMetadata = parseSkillHeaderForCli(info.skillContent);
+      } catch (_) { } finally { await fs.unlink(tmpPath).catch(() => {}); }
+    }
 
     ui.step('Saving to local store');
     const existing = await readFileData(cid).catch(() => null);
