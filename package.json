@@ -1,6 +1,6 @@
 {
   "name": "diamond-soul-downloader",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Diamond Soul Downloader - Install AI Skills from IPFS",
   "main": "lib/config.js",
   "bin": {
