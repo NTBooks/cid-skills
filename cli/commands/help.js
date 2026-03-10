@@ -51,7 +51,7 @@ function getCliHelpText(pluginHelps = []) {
     `  ${c.yellow}--no-delete-blocked${c.reset}  Do not delete blocked items`,
     '',
     `${c.bold}Options for freeze:${c.reset}`,
-    `  ${c.yellow}--filename=NAME${c.reset}     Override the stored file name ${c.gray}(e.g. my-skill.md)${c.reset}`,
+    `  ${c.yellow}--filename=NAME${c.reset}     Set a display title for the file ${c.gray}(no extension needed, e.g. My Skill)${c.reset}`,
     `  ${c.yellow}--shortname=NAME${c.reset}    Register shortname ${c.gray}(username@NAME:version)${c.reset}`,
     `  ${c.yellow}--tags=tag1,tag2${c.reset}    Comma-separated tags`,
     `  ${c.yellow}--version=X.Y.Z${c.reset}     Version ${c.gray}(default: 1.0.0)${c.reset}`,

@@ -21,9 +21,9 @@ async function runCliFreeze(opts, ui) {
     const stat = await fs.stat(filePath).catch(() => null);
     if (!stat || !stat.isFile()) { ui.fail('File not found or not a file: ' + filePath); return false; }
 
-    const filenameOverride = opts.filename && String(opts.filename).trim();
-    const filename = filenameOverride || path.basename(filePath);
-    const ext = path.extname(path.basename(filePath)).toLowerCase();
+    const filename = path.basename(filePath);
+    const displayTitle = opts.filename && String(opts.filename).trim();
+    const ext = path.extname(filename).toLowerCase();
 
     if (ext === '.zip') {
       ui.step('Validating zip structure');
@@ -45,7 +45,7 @@ async function runCliFreeze(opts, ui) {
     const version = (opts.version && String(opts.version).trim()) || '1.0.0';
     const authHeader = 'Basic ' + Buffer.from(credentials.username + ':' + credentials.applicationKey).toString('base64');
 
-    if (filenameOverride) ui.detail('filename', filenameOverride);
+    if (displayTitle) ui.detail('title', displayTitle);
     if (opts.shortname) ui.detail('shortname', opts.shortname);
     if (opts.tags) ui.detail('tags', opts.tags);
     if (opts.supercede) ui.detail('supercede', opts.supercede);
@@ -58,6 +58,7 @@ async function runCliFreeze(opts, ui) {
       const form = new FormData();
       form.append('cl_file', fileBuffer, { filename });
       form.append('filename', filename);
+      if (displayTitle) form.append('title', displayTitle);
       form.append('version', version);
       if (opts.tags) form.append('tags', opts.tags);
       if (opts.shortname) form.append('shortname', opts.shortname.trim());
@@ -82,6 +83,7 @@ async function runCliFreeze(opts, ui) {
       ui.detail('size', (Buffer.byteLength(content, 'utf-8') / 1024).toFixed(1) + ' KB');
       const params = new URLSearchParams();
       params.append('filename', filename);
+      if (displayTitle) params.append('title', displayTitle);
       params.append('content', content);
       params.append('version', version);
       if (opts.tags) params.append('tags', opts.tags);
