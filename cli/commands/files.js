@@ -39,6 +39,8 @@ async function runCliFiles(opts, ui) {
       const bundle = f.is_skill_bundle ? ' ' + (ui.c && ui.c.yellow || '') + '[bundle]' + (ui.c && ui.c.reset || '') : '';
       ui.raw('  ' + (ui.c && ui.c.bold || '') + title + (ui.c && ui.c.reset || '') + bundle);
       ui.detail('CID', ui.cid(cidStr));
+      const postId = f.id ?? f.ID ?? f.post_id;
+      if (postId != null) ui.detail('Post ID', String(postId));
       ui.detail('Date', date);
       if (shortnames) ui.detail('Shortnames', shortnames);
       if (tags) ui.detail('Tags', tags);
