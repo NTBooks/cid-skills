@@ -84,13 +84,15 @@ async function runCliInstallDirectIpfs(cid, options = {}, installRef, ui) {
     if (options.skillsFolder != null) await fs.mkdir(skillsFolder, { recursive: true });
 
     ui.step('Activating skill');
-    const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : undefined;
+    const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : {};
+    const shortnameRef = (installRef && installRef !== cid) ? installRef : null;
+    if (shortnameRef) activateOptions.shortname = shortnameRef;
     const activateResult = await doActivateFile(cid, activateOptions);
     if (!activateResult.success) { ui.fail('Activate failed:', activateResult.error); return false; }
 
     try {
       const hostname = await getProviderHostname();
-      await updateDsoulJson(skillsFolder, 'add', { cid, shortname: (installRef && installRef !== cid) ? installRef : null, post_id: null, post_link: null, hostname: hostname || null });
+      await updateDsoulJson(skillsFolder, 'add', { cid, shortname: shortnameRef, post_id: null, post_link: null, hostname: hostname || null });
     } catch (_) { }
 
     const skillName = skillMetadata?.name || cid;
@@ -217,7 +219,9 @@ async function runCliInstall(cid, options = {}, installRef, ui) {
     if (options.skillsFolder != null) await fs.mkdir(skillsFolder, { recursive: true });
 
     ui.step('Activating skill');
-    const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : undefined;
+    const activateOptions = options.skillsFolder != null ? { skillsFolderOverride: skillsFolder } : {};
+    const shortnameRef = (installRef && installRef !== cid) ? installRef : null;
+    if (shortnameRef) activateOptions.shortname = shortnameRef;
     const activateResult = await doActivateFile(cid, activateOptions);
     if (!activateResult.success) { ui.fail('Activate failed:', activateResult.error); return false; }
 
@@ -226,7 +230,7 @@ async function runCliInstall(cid, options = {}, installRef, ui) {
     try {
       const hostname = options.providerBase ? getHostnameFromProviderBase(options.providerBase) : await getProviderHostname();
       await updateDsoulJson(skillsFolder, 'add', {
-        cid, shortname: (installRef && installRef !== cid) ? installRef : null,
+        cid, shortname: shortnameRef,
         post_id: postId, post_link: postLink || null, hostname: hostname || null
       });
     } catch (_) { }
